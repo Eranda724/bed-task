@@ -1,29 +1,37 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
-# Environments
-.env
-.venv
-env/
+# Virtual environment
 venv/
-ENV/
-env.bak/
-venv.bak/
+env/
+.venv/
 
-# Output directories
+# Model weights (auto-downloaded by Ultralytics, no need to commit)
+*.pt
+yolov8n-pose.pt
+
+# Videos (large binary files, store separately)
+data/videos/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Generated outputs (large, regenerable from videos + code)
 outputs/
 
-# Tool configurations
-.qodo/
+# OS-specific junk
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# VS Code / IDEs
+# IDE
 .vscode/
 .idea/
 *.swp
-*.swo
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Logs
+*.log
