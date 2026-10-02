@@ -5,17 +5,19 @@ Runs YOLOv8-pose on each sampled frame to get:
     - person bounding box
     - 17 body keypoints (COCO format) with per-keypoint confidence
     - a tracking ID (via Ultralytics' built-in ByteTrack), so the same
-      person keeps the same ID across frames - this matters for the PDF's
-      "caregiver entering the scene" difficult case, where two people may
-      appear and we need to know which one is the patient being monitored.
+      person keeps the same ID across frames.
 
-Model choice: YOLOv8n-pose (the "nano" / smallest variant).
-    - Free, open-source (Ultralytics).
-    - Combines person detection + pose in a single forward pass, instead of
-      needing a separate detector and a separate pose model.
-    - "n" (nano) size chosen deliberately for CPU-only inference (AMD
-      Radeon 850M has no CUDA support) - trades some accuracy for speed,
-      acceptable since we only process ~30 sampled frames per 15s clip.
+Model choice: YOLOv8n-pose (the "nano" variant) - free, open-source,
+combines detection + pose in one pass, chosen for CPU-only inference
+(AMD Radeon 850M has no CUDA support).
+
+Confidence threshold (conf=0.5): filters out low-confidence false
+detections (e.g. rumpled blankets or shadows mistaken for a person).
+
+Deduplication: YOLO occasionally produces two overlapping boxes for one
+body in unusual poses (e.g. fully horizontal lying position) that its own
+NMS doesn't merge. We remove duplicates by keeping only the
+higher-confidence box when two detections overlap heavily.
 
 COCO keypoint order (used by YOLOv8-pose), 17 keypoints:
     0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear,
@@ -40,6 +42,45 @@ KEYPOINT_NAMES = [
     "left_wrist", "right_wrist", "left_hip", "right_hip",
     "left_knee", "right_knee", "left_ankle", "right_ankle",
 ]
+
+
+def compute_iou(box1, box2):
+    """IoU (intersection over union) between two [x1,y1,x2,y2] boxes."""
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+
+    inter_w = max(0, x2 - x1)
+    inter_h = max(0, y2 - y1)
+    inter_area = inter_w * inter_h
+
+    area1 = max(0, box1[2] - box1[0]) * max(0, box1[3] - box1[1])
+    area2 = max(0, box2[2] - box2[0]) * max(0, box2[3] - box2[1])
+    union = area1 + area2 - inter_area
+
+    return inter_area / union if union > 0 else 0.0
+
+
+def deduplicate_persons(persons, iou_threshold=0.5):
+    """
+    Removes duplicate detections of the same person. When two detections
+    overlap above iou_threshold, keep only the one with higher detection
+    confidence.
+    """
+    kept = []
+    sorted_persons = sorted(persons, key=lambda p: p["detection_confidence"], reverse=True)
+
+    for person in sorted_persons:
+        is_duplicate = False
+        for kept_person in kept:
+            if compute_iou(person["box_xyxy"], kept_person["box_xyxy"]) > iou_threshold:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            kept.append(person)
+
+    return kept
 
 
 def load_frame_index(frames_dir: str):
@@ -67,9 +108,7 @@ def run_pose_tracking(frames_dir: str, out_path: str, model_name: str = "yolov8n
     for i, fname in enumerate(frame_files):
         frame_path = os.path.join(frames_dir, fname)
 
-        # persist=True keeps tracker state across calls so IDs stay
-        # consistent across frames within this video
-        results = model.track(source=frame_path, persist=True, verbose=False)
+        results = model.track(source=frame_path, persist=True, verbose=False, conf=0.5)
         result = results[0]
 
         timestamp_sec = None
@@ -110,6 +149,7 @@ def run_pose_tracking(frames_dir: str, out_path: str, model_name: str = "yolov8n
                     "keypoints": keypoint_records,
                 })
 
+        frame_record["persons"] = deduplicate_persons(frame_record["persons"])
         results_out.append(frame_record)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
