@@ -1,0 +1,4 @@
+start_time,end_time,state
+00:00,00:02,STANDING
+00:02,00:10,WALKING
+00:10,00:15,OUT_OF_BED

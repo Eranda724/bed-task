@@ -1,0 +1,4 @@
+start_time,end_time,state
+00:00,00:06,WALKING
+00:06,00:13,UNKNOWN
+00:13,00:15,WALKING
