@@ -115,12 +115,16 @@ def evaluate_states(clip_name, gt_states_path, timeline_path):
     return results
 
 
-def evaluate_events(clip_name, gt_events_path, pred_events_path):
+def evaluate_events(clip_name, gt_events_path, pred_events_path, event_type=None):
     gt_events = load_ground_truth_events(gt_events_path)
     pred_events = []
     if os.path.exists(pred_events_path):
         with open(pred_events_path) as f:
             pred_events = json.load(f)
+
+    if event_type:
+        gt_events = [e for e in gt_events if e[0] == event_type]
+        pred_events = [e for e in pred_events if e["event"] == event_type]
 
     matched_gt = set()
     matched_pred = set()
@@ -206,7 +210,8 @@ def main(clips_dir, out_path):
 
     all_state_results = []
     per_clip_state_results = {}
-    event_eval_results = []
+    event_exit_results = []
+    event_return_results = []
     duration_eval_results = {}
     failure_examples = []
 
@@ -230,9 +235,13 @@ def main(clips_dir, out_path):
                         "ground_truth": gt_state, "predicted": pred_state,
                     })
 
-        event_result = evaluate_events(clip, gt_events_path, events_path)
-        if event_result:
-            event_eval_results.append(event_result)
+        event_exit_result = evaluate_events(clip, gt_events_path, events_path, "bed_exit")
+        if event_exit_result:
+            event_exit_results.append(event_exit_result)
+            
+        event_return_result = evaluate_events(clip, gt_events_path, events_path, "return_to_bed")
+        if event_return_result:
+            event_return_results.append(event_return_result)
 
         duration_result = evaluate_durations(clip, gt_states_path, summary_path)
         if duration_result:
@@ -241,11 +250,17 @@ def main(clips_dir, out_path):
     matrix, accuracy, correct, total = build_confusion_matrix(all_state_results)
     matrix_readable = {gt: dict(preds) for gt, preds in matrix.items()}
 
-    total_tp = sum(e["true_positives"] for e in event_eval_results)
-    total_fp = sum(e["false_positives"] for e in event_eval_results)
-    total_fn = sum(e["false_negatives"] for e in event_eval_results)
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else None
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else None
+    exit_tp = sum(e["true_positives"] for e in event_exit_results)
+    exit_fp = sum(e["false_positives"] for e in event_exit_results)
+    exit_fn = sum(e["false_negatives"] for e in event_exit_results)
+    exit_precision = exit_tp / (exit_tp + exit_fp) if (exit_tp + exit_fp) > 0 else None
+    exit_recall = exit_tp / (exit_tp + exit_fn) if (exit_tp + exit_fn) > 0 else None
+
+    return_tp = sum(e["true_positives"] for e in event_return_results)
+    return_fp = sum(e["false_positives"] for e in event_return_results)
+    return_fn = sum(e["false_negatives"] for e in event_return_results)
+    return_precision = return_tp / (return_tp + return_fp) if (return_tp + return_fp) > 0 else None
+    return_recall = return_tp / (return_tp + return_fn) if (return_tp + return_fn) > 0 else None
 
     overall_duration_errors = defaultdict(list)
     for clip, errors in duration_eval_results.items():
@@ -268,13 +283,21 @@ def main(clips_dir, out_path):
             "total_frames": total,
             "confusion_matrix": matrix_readable,
         },
-        "bed_events": {
-            "per_clip": event_eval_results,
-            "overall_true_positives": total_tp,
-            "overall_false_positives": total_fp,
-            "overall_false_negatives": total_fn,
-            "precision": round(precision, 4) if precision is not None else None,
-            "recall": round(recall, 4) if recall is not None else None,
+        "bed_exit_metrics": {
+            "per_clip": event_exit_results,
+            "true_positives": exit_tp,
+            "false_positives": exit_fp,
+            "false_negatives": exit_fn,
+            "precision": round(exit_precision, 4) if exit_precision is not None else None,
+            "recall": round(exit_recall, 4) if exit_recall is not None else None,
+        },
+        "return_to_bed_metrics": {
+            "per_clip": event_return_results,
+            "true_positives": return_tp,
+            "false_positives": return_fp,
+            "false_negatives": return_fn,
+            "precision": round(return_precision, 4) if return_precision is not None else None,
+            "recall": round(return_recall, 4) if return_recall is not None else None,
         },
         "duration_estimation": {
             "per_clip": duration_eval_results,
@@ -292,9 +315,13 @@ def main(clips_dir, out_path):
     print(f"\nConfusion matrix (ground_truth -> predicted counts):")
     for gt_state, preds in matrix_readable.items():
         print(f"  {gt_state}: {preds}")
-    print(f"\nBed events: TP={total_tp} FP={total_fp} FN={total_fn}")
-    if precision is not None:
-        print(f"  Precision: {precision:.1%}  Recall: {recall:.1%}")
+    print(f"\nBed Exits: TP={exit_tp} FP={exit_fp} FN={exit_fn}")
+    if exit_precision is not None:
+        print(f"  Precision: {exit_precision:.1%}  Recall: {exit_recall:.1%}")
+        
+    print(f"\nReturn to Bed: TP={return_tp} FP={return_fp} FN={return_fn}")
+    if return_precision is not None:
+        print(f"  Precision: {return_precision:.1%}  Recall: {return_recall:.1%}")
     print(f"\nAverage duration error by state (seconds):")
     for state, err in avg_duration_errors.items():
         print(f"  {state}: {err}s")

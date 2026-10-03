@@ -39,10 +39,10 @@ flowchart TD
     K --> M
 ```
 
-**Pipeline stages, in order:**
-1. **Perception** (`src/perception/`) — person detection, pose estimation, tracking, bed-region marking
-2. **Features** — per-frame posture/motion signals derived from pose keypoints
-3. **Temporal** (`src/temporal/`) — per-frame classification, then flicker-removal and segment building
+**Pipeline stages and Model choices:**
+1. **Perception** (`src/perception/`) — Uses **YOLOv8n-pose** for lightweight, fast person detection and pose estimation. Uses **BoT-SORT (the Ultralytics default)** for tracking, chosen for its speed and reliability in associating bounding boxes across contiguous frames using Kalman filter motion prediction. Uses a **manual 4-point polygon** to define the bed region, as automated bed detection from variable angles is unreliable without 3D depth sensors.
+2. **Features** — per-frame posture/motion signals derived from pose keypoints.
+3. **Temporal** (`src/temporal/`) — Uses a **rule-based classification** system for per-frame candidates, chosen over a black-box temporal model because it provides 100% transparent, explainable thresholds. Followed by flicker-removal and segment building.
 4. **Events** (`src/events/`) — bed exit/return detection from timeline segments
 5. **Outputs** (`src/outputs/`) — duration summaries
 6. **Agent** (`src/agent/`) — reasoning trace + NORMAL/MONITOR/ALERT decisions
@@ -155,36 +155,37 @@ the pattern match.
 **Alert decision logic** (`NORMAL` / `MONITOR` / `ALERT`), in priority order:
 1. **Prolonged absence** (out of bed ≥ 10 minutes without returning) → `ALERT`, regardless of detection confidence. This directly matches the PDF's own named example ("unexpected prolonged absence from bed"). None of the 15-second test clips are long enough to trigger this, so it is validated by manual trace rather than live test data — documented honestly here rather than hidden.
 2. **Returned to bed within the clip** → `NORMAL`
-3. **Very brief walking** (< 3s total) after a detected exit → `MONITOR` (likely repositioning, not a true exit)
-4. **High-confidence exit** (≥ 0.85) → `ALERT`
-5. **Moderate/low-confidence exit** → `MONITOR`
+3. **Prolonged sitting on bed edge** (≥ 5 seconds) → `MONITOR`
+4. **Bed exit detected** → `MONITOR` (whether high or low confidence, per the PDF's 0.92 confidence example)
+5. **Very brief walking** (< 3s total) after a detected exit → `MONITOR` (downgraded from confirmed exit to potential repositioning)
+6. **Person lying horizontally, but not confidently on the bed** (e.g. low bed overlap) → `MONITOR` (activity cannot be confidently determined)
 
 ## Evaluation Results
 
-Evaluated across all 13 test clips, scoring predicted output against
-hand-labeled ground truth.
+Evaluated across all 13 test clips, scoring predicted output against hand-labeled ground truth.
 
 ### State Classification
-- **Overall accuracy: 64.2%** (256/399 sampled frames, at the same 0.5s interval used throughout the pipeline)
-- Per-state accuracy ranges from 100% (UNKNOWN) down to ~39% (STANDING, LYING_IN_BED)
-- **Most LYING_IN_BED errors are UNKNOWN, not a wrong state** — 54 of 69 misclassifications are the system correctly refusing to guess during occlusion (blanket coverage, person rolling onto their side) rather than a detection error.
-- Full confusion matrix in `outputs/evaluation_report.json`.
+- **Overall accuracy: 64.4%** (253/393 sampled frames, at the same 0.5s interval used throughout the pipeline)
+- **Confusion Matrix Highlights**: Note the confusion between `SITTING_ON_BED` and `SITTING_OUTSIDE_BED` (e.g. 23 SITTING_OUTSIDE_BED correctly identified, but 2 misclassified as SITTING_ON_BED and 4 as STANDING). The tracker uses a 2D heuristic, causing some ambiguity at the bed's border.
+- **Most LYING_IN_BED errors are UNKNOWN, not a wrong state** — 53 misclassifications are the system correctly refusing to guess during occlusion (blanket coverage, person rolling onto their side) rather than a detection error.
+- Example failure cases and the full confusion matrix are exported to `outputs/evaluation_report.json`.
 
 ### Bed Events
-- **Precision: 100%, Recall: 100%** (4 true positives, 0 false positives, 0 false negatives) across clips containing a real bed-exit or return-to-bed event.
+- **Bed Exits:** Precision: 100.0%, Recall: 100.0% (2 true positives, 0 false positives, 0 false negatives)
+- **Return to Bed:** Precision: 100.0%, Recall: 100.0% (2 true positives, 0 false positives, 0 false negatives)
 
 ### Duration Estimation
-All per-state average errors are under 3 seconds, several well under 1.5s:
+Average absolute error in duration calculation compared to ground truth:
 
 | State | Avg. error |
 |---|---|
 | sitting_outside_bed | 0.27s |
-| out_of_bed | 0.0s |
-| standing | 1.0s |
-| sitting_on_bed | 1.15s |
-| walking | 1.27s |
-| lying_in_bed | 2.5s |
-| unknown | 2.69s |
+| standing | 0.77s |
+| out_of_bed | 0.96s |
+| sitting_on_bed | 1.12s |
+| walking | 1.35s |
+| lying_in_bed | 2.38s |
+| unknown | 3.85s |
 
 This matches the PDF's own duration-error example format closely (e.g.
 "Lying duration error: 8 sec") and is comparable or better.
@@ -221,6 +222,9 @@ position continuity (which was found to drift once it locked onto the
 wrong person even briefly) — correctly reporting UNKNOWN for the occluded
 frames instead of inventing movement the patient never made.
 
+**4. Posture transition delays and ambiguity (`case02_sitting_up`, `case04_stand_sit_back`)**
+In `case02`, the transition from lying to sitting up is predicted as `LYING_IN_BED` for several seconds after the ground truth marks `SITTING_ON_BED`. This is because the torso angle crosses the strict threshold a bit later in the movement. Similarly, in `case04`, a `STANDING` state is occasionally misclassified as `SITTING_OUTSIDE_BED` due to the 2D bounding box ratio being sensitive to camera perspective during the transition.
+
 ## Known Limitations
 
 - **Three PDF difficult cases are not represented in the test data**: a clean "sitting on a chair" clip and a true multi-person caregiver-interaction clip did not render as intended from the free AI video generator despite several prompt attempts; the closest available clips were used and relabeled honestly rather than discarded.
@@ -228,6 +232,7 @@ frames instead of inventing movement the patient never made.
 - **Bed region is manually marked** per video (4-point polygon), not automatically detected — reasonable for a handful of fixed-camera clips, but would not scale without automation in a real deployment.
 - **Test clips are AI-generated**, not real footage of an elderly person. This was a scope compromise given no access to real test subjects; AI-generated people occasionally have anatomically unusual proportions or implausible motion, which may not represent real-world pose model performance.
 - **Clips are short (~12-15s)**, so the prolonged-absence ALERT rule (10-minute threshold) is implemented and documented but never exercised by the test data.
+- **Hidden vs Gone**: If a person walks out of view, the final sequence is marked `OUT_OF_BED`. However, if a person leaves and comes back within one clip, the gap stays `UNKNOWN`, because the system can't tell hidden from gone.
 
 ## What I'd Do Differently With More Time
 

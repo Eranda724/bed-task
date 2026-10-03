@@ -298,9 +298,10 @@ def process(candidates_data, bed_centroid=None):
     segments = build_segments(sequence, clip_end_sec=clip_end_sec)
     
     OUT_OF_BED_TRIGGERS = {"WALKING", "STANDING", "SITTING_OUTSIDE_BED"}
-    for i in range(1, len(segments)):
-        if segments[i]["state"] == "UNKNOWN" and segments[i-1]["state"] in OUT_OF_BED_TRIGGERS:
-            segments[i]["state"] = "OUT_OF_BED"
+    if len(segments) > 1:
+        last_idx = len(segments) - 1
+        if segments[last_idx]["state"] == "UNKNOWN" and segments[last_idx-1]["state"] in OUT_OF_BED_TRIGGERS:
+            segments[last_idx]["state"] = "OUT_OF_BED"
 
     segments = flag_transitions(segments)
     for seg in segments:

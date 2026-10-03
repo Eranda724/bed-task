@@ -10,6 +10,7 @@ import statistics
 # thresholds
 MIN_WALKING_SEC_FOR_EXIT = 3.0
 HIGH_CONFIDENCE = 0.85
+LONG_SITTING_SEC = 5.0
 
 def total_state_time(segments, state):
     return sum(seg["end_time_sec"] - seg["start_time_sec"] for seg in segments if seg["state"] == state)
@@ -73,7 +74,7 @@ def reason_bed_exit(event, segments, features):
     if conf >= HIGH_CONFIDENCE:
         trace[-1]["finding"] = "High confidence exit. Evidence is sufficient."
         trace[-1]["conclusion"] = "BED_EXIT confirmed."
-        return {**event, "action": "ALERT", "reasoning_trace": trace}
+        return {**event, "action": "MONITOR", "reasoning_trace": trace}
         
     trace[-1]["finding"] = "Confidence is low/moderate. More context needed."
     
@@ -156,6 +157,24 @@ def reason_segment(seg, features):
     })
     return {"event": "lying_check", "segment": seg, "action": "NORMAL", "reasoning_trace": trace}
 
+def reason_sitting_segment(seg):
+    duration = seg["end_time_sec"] - seg["start_time_sec"]
+    trace = [{
+        "observation": f"Person is SITTING_ON_BED from {seg['start_time']} to {seg['end_time']} (duration {duration:.1f}s).",
+        "action": "Check if sitting duration exceeds threshold.",
+        "finding": None,
+        "conclusion": None
+    }]
+    
+    if duration >= LONG_SITTING_SEC:
+        trace[-1]["finding"] = f"Sitting duration {duration:.1f}s >= {LONG_SITTING_SEC}s threshold."
+        trace[-1]["conclusion"] = "Prolonged sitting on bed edge detected."
+        return {"event": "long_sitting_check", "segment": seg, "action": "MONITOR", "reasoning_trace": trace}
+    
+    trace[-1]["finding"] = f"Sitting duration {duration:.1f}s is normal."
+    trace[-1]["conclusion"] = "Normal sitting."
+    return {"event": "long_sitting_check", "segment": seg, "action": "NORMAL", "reasoning_trace": trace}
+
 def analyze(segments, events, features):
     reasoned_items = []
     
@@ -168,6 +187,8 @@ def analyze(segments, events, features):
     for seg in segments:
         if seg["state"] == "LYING_IN_BED":
             reasoned_items.append(reason_segment(seg, features))
+        elif seg["state"] == "SITTING_ON_BED":
+            reasoned_items.append(reason_sitting_segment(seg))
             
     lying_sec   = total_state_time(segments, "LYING_IN_BED")
     walking_sec = total_state_time(segments, "WALKING")
