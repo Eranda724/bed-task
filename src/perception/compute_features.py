@@ -108,6 +108,27 @@ def compute_bed_overlap_ratio(box_xyxy, bed_polygon):
     person_area = max((px2 - px1) * (py2 - py1), 1e-6)
     return inter_area / person_area
 
+def point_in_polygon(point, polygon):
+    """
+    Standard ray-casting point-in-polygon test. Returns True if point
+    lies inside the polygon (the bed region).
+    """
+    x, y = point
+    n = len(polygon)
+    inside = False
+    px1, py1 = polygon[0]
+    for i in range(1, n + 1):
+        px2, py2 = polygon[i % n]
+        if y > min(py1, py2):
+            if y <= max(py1, py2):
+                if x <= max(px1, px2):
+                    if py1 != py2:
+                        x_intersect = (y - py1) * (px2 - px1) / (py2 - py1) + px1
+                    if px1 == px2 or x <= x_intersect:
+                        inside = not inside
+        px1, py1 = px2, py2
+    return inside
+
 
 def compute_visibility_score(person):
     confidences = [kp["confidence"] for kp in person["keypoints"] if kp["confidence"] is not None]
@@ -141,6 +162,15 @@ def compute_features(pose_data, bed_polygon):
             bed_overlap = compute_bed_overlap_ratio(box, bed_polygon)
             visibility = compute_visibility_score(person)
 
+            # Hip-point test: more reliable than whole-box overlap for
+            # telling on-bed vs off-bed, since sitting upright raises the
+            # box well above the bed's flat footprint while the hips stay
+            # roughly where the body contacts the bed surface.
+            l_hip = get_keypoint(person, "left_hip")
+            r_hip = get_keypoint(person, "right_hip")
+            hip_mid = midpoint(l_hip, r_hip)
+            on_bed_point = point_in_polygon(hip_mid, bed_polygon) if (hip_mid and bed_polygon) else None
+
             center = get_box_center(box)
             motion_speed = None
 
@@ -166,8 +196,10 @@ def compute_features(pose_data, bed_polygon):
                 "torso_angle_deg": torso_angle,
                 "height_width_ratio": round(height_width_ratio, 3),
                 "bed_overlap_ratio": round(bed_overlap, 3) if bed_overlap is not None else None,
+                "on_bed_point": on_bed_point,
                 "motion_speed": round(motion_speed, 2) if motion_speed is not None else None,
                 "visibility_score": round(visibility, 3),
+                "box_center": [round(center[0], 1), round(center[1], 1)],
             })
 
         features_out.append(frame_features)
