@@ -85,6 +85,51 @@ def detect_bed_exits(segments):
             })
     return events
 
+
+MIN_IN_BED_SEC_FOR_DIRECT_EXIT = 1.5  # the IN_BED segment must have lasted at
+                                       # least this long to rule out flicker
+                                       # misclassifications at the bed edge
+                                       # (case04's SITTING_ON_BED was only 0.5s)
+
+
+def detect_bed_exits_direct(segments):
+    """
+    Secondary two-step pattern: IN_BED_STATE -> WALKING (no STANDING).
+
+    Physically possible when a patient swings their legs off the bed and
+    immediately starts walking without pausing upright first (e.g. poor
+    lighting clips where STANDING is brief and misclassified, as in case12).
+
+    Guard: the IN_BED segment must last >= MIN_IN_BED_SEC_FOR_DIRECT_EXIT to
+    exclude short flicker misclassifications at the bed edge (e.g. case04,
+    where SITTING_ON_BED lasted only 0.5s before WALKING).
+
+    Confidence is capped at 0.70 because the absent STANDING step means
+    we have one fewer piece of confirming evidence.
+    """
+    events = []
+    for i in range(len(segments) - 1):
+        seg_bed = segments[i]
+        seg_walking = segments[i + 1]
+
+        in_bed_duration = seg_bed["end_time_sec"] - seg_bed["start_time_sec"]
+        if (seg_bed["state"] in IN_BED_STATES
+                and seg_walking["state"] == "WALKING"
+                and in_bed_duration >= MIN_IN_BED_SEC_FOR_DIRECT_EXIT):
+            raw_conf = confidence_for_segment(seg_walking)
+            capped_conf = min(raw_conf, 0.70)
+            events.append({
+                "event": "bed_exit",
+                "start_time": seg_bed["start_time"],
+                "confirmed_time": seg_walking["start_time"],
+                "previous_state": seg_bed["state"],
+                "current_state": seg_walking["state"],
+                "confidence": capped_conf,
+                "decision": "MONITOR",
+            })
+    return events
+
+
 def detect_bed_exits_from_clip_start(segments, first_segment_near_bed):
     """
     Secondary, lower-confidence pattern: if the clip's very FIRST segment
@@ -172,6 +217,12 @@ def detect_events(segments, features_data=None, bed_centroid=None):
     events = detect_bed_exits(segments) + detect_bed_returns(segments)
 
     if not any(e["event"] == "bed_exit" for e in events):
+        # Fallback 1: two-step IN_BED -> WALKING (no STANDING intermediate)
+        # Only fires if the IN_BED segment was long enough to be real (not flicker).
+        events += detect_bed_exits_direct(segments)
+
+    if not any(e["event"] == "bed_exit" for e in events):
+        # Fallback 2: clip starts already mid-exit (STANDING/WALKING at t=0)
         first_segment_near_bed = False
         if features_data is not None and bed_centroid is not None and segments:
             first_segment_near_bed = is_first_segment_near_bed(
