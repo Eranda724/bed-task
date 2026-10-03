@@ -65,38 +65,126 @@ python src/perception/detect_pose_track.py --frames_dir outputs/frames/case05_le
 python src/perception/compute_features.py --pose_json outputs/pose/case05_leaving_bed_pose.json --bed_region data/bed_regions/case05_leaving_bed.json --out outputs/features/case05_leaving_bed_features.json
 python src/temporal/classify_frames.py --features outputs/features/case05_leaving_bed_features.json --out outputs/states/case05_leaving_bed_candidates.json
 python src/temporal/smooth_states.py --candidates outputs/states/case05_leaving_bed_candidates.json --bed_region data/bed_regions/case05_leaving_bed.json --out outputs/timeline/case05_leaving_bed_timeline.json
-python src/outputs/duration_summary.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --out outputs/summary/case05_leaving_bed_summary.json
 python src/events/detect_bed_events.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --features outputs/features/case05_leaving_bed_features.json --bed_region data/bed_regions/case05_leaving_bed.json --out outputs/events/case05_leaving_bed_events.json
+python src/outputs/duration_summary.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --events outputs/events/case05_leaving_bed_events.json --out outputs/summary/case05_leaving_bed_summary.json
 python src/agent/agent_analysis.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --events outputs/events/case05_leaving_bed_events.json --out outputs/agent/case05_leaving_bed_reasoning.json
 ```
 
 ### Run everything on all clips at once
 ```bash
-python src/perception/run_phase1_all.py     # frames, pose, tracking, viz (bed regions must be marked first)
-python src/perception/run_phase2_all.py     # features
-python src/temporal/run_phase3_all.py       # classification + smoothing
-python src/events/run_phase5_all.py         # bed events
-python src/outputs/run_phase4_all.py        # duration summaries
-python src/agent/run_phase6_all.py          # agentic reasoning + alerts
-python src/evaluation/evaluate.py           # full evaluation report
+python src/perception/track_all_videos.py     # frames, pose, tracking, viz (bed regions must be marked first)
+python src/perception/compute_all_features.py # features
+python src/temporal/generate_all_timelines.py # classification + smoothing
+python src/events/detect_all_events.py        # bed events
+python src/outputs/generate_all_summaries.py  # duration summaries
+python src/agent/analyze_all_clips.py         # agentic reasoning + alerts
+python src/evaluation/evaluate.py             # full evaluation report
 ```
 
 Output appears under `outputs/` — `timeline/`, `summary/`, `events/`, `agent/`, and a single consolidated `evaluation_report.json`.
 
+### Example Outputs (`case05_leaving_bed`)
+
+**Timeline** (`outputs/timeline/case05_leaving_bed_timeline.json`)
+```json
+[
+  {
+    "state": "STANDING",
+    "start_time_sec": 0.0,
+    "end_time_sec": 1.0,
+    "transition_flag": "start_of_clip",
+    "start_time": "00:00.00",
+    "end_time": "00:01.00"
+  },
+  {
+    "state": "WALKING",
+    "start_time_sec": 1.0,
+    "end_time_sec": 10.0,
+    "transition_flag": "expected",
+    "start_time": "00:01.00",
+    "end_time": "00:10.00"
+  },
+  {
+    "state": "OUT_OF_BED",
+    "start_time_sec": 10.0,
+    "end_time_sec": 12.0,
+    "transition_flag": "expected",
+    "start_time": "00:10.00",
+    "end_time": "00:12.00"
+  }
+]
+```
+
+**Events** (`outputs/events/case05_leaving_bed_events.json`)
+```json
+[
+  {
+    "event": "bed_exit",
+    "start_time": "00:00.00",
+    "confirmed_time": "00:01.00",
+    "previous_state": "UNKNOWN (not visible before clip start)",
+    "current_state": "WALKING",
+    "confidence": 0.5,
+    "decision": "MONITOR"
+  }
+]
+```
+
+**Summary** (`outputs/summary/case05_leaving_bed_summary.json`)
+```json
+{
+  "total_observation_time": "0m 12s",
+  "observation_duration_sec": 12.0,
+  "activity_summary": {
+    "lying_in_bed": "0m 00s",
+    "sitting_on_bed": "0m 00s",
+    "sitting_outside_bed": "0m 00s",
+    "standing": "0m 01s",
+    "walking": "0m 09s",
+    "out_of_bed": "0m 02s",
+    "unknown": "0m 00s"
+  },
+  "activity_duration_sec": {
+    "lying_in_bed": 0.0,
+    "sitting_on_bed": 0.0,
+    "sitting_outside_bed": 0.0,
+    "standing": 1.0,
+    "walking": 9.0,
+    "out_of_bed": 2.0,
+    "unknown": 0.0
+  },
+  "bed_summary": {
+    "time_in_bed": "0m 00s",
+    "time_out_of_bed": "0m 12s",
+    "time_unknown": "0m 00s",
+    "bed_exit_count": 1
+  },
+  "total_in_bed_sec": 0.0,
+  "total_out_of_bed_sec": 12.0,
+  "total_unknown_sec": 0.0,
+  "longest_out_of_bed_period_sec": 12.0,
+  "bed_exit_count": 1,
+  "bed_return_count": 0,
+  "final_state": "OUT_OF_BED"
+}
+```
+
 ## Project Structure
 
+```text
 ├── data/
-│ ├── videos/ 13 AI-generated test clips (~15s each)
+│ ├── videos/       13 AI-generated test clips (~15s each)
 │ ├── ground_truth/ hand-labeled states + bed events per clip
-│ └── bed_regions/ 4-point bed polygon per clip
+│ └── bed_regions/  4-point bed polygon per clip
 ├── src/
-│ ├── perception/ detection, pose, tracking, bed marking, features
-│ ├── temporal/ classification + smoothing (state machine)
-│ ├── outputs/ duration summaries
-│ ├── events/ bed exit/return detection
-│ ├── agent/ agentic reasoning + NORMAL/MONITOR/ALERT
-│ └── evaluation/ scoring against ground truth
-└── outputs/ generated timelines, summaries, events, reports
+│ ├── perception/   detection, pose, tracking, bed marking, features
+│ ├── temporal/     classification + smoothing (state machine)
+│ ├── outputs/      duration summaries
+│ ├── events/       bed exit/return detection
+│ ├── agent/        agentic reasoning + NORMAL/MONITOR/ALERT
+│ └── evaluation/   scoring against ground truth
+└── outputs/        generated timelines, summaries, events, reports
+```
 
 
 ## States and Transitions
@@ -155,7 +243,7 @@ the pattern match.
 **Alert decision logic** (`NORMAL` / `MONITOR` / `ALERT`), in priority order:
 1. **Prolonged absence** (out of bed ≥ 10 minutes without returning) → `ALERT`, regardless of detection confidence. This directly matches the PDF's own named example ("unexpected prolonged absence from bed"). None of the 15-second test clips are long enough to trigger this, so it is validated by manual trace rather than live test data — documented honestly here rather than hidden.
 2. **Returned to bed within the clip** → `NORMAL`
-3. **Prolonged sitting on bed edge** (≥ 5 seconds) → `MONITOR`
+3. **Prolonged sitting on bed edge** (≥ 5 seconds) → `MONITOR` *(Note: This threshold is scaled down specifically for these 15s test clips. In a real deployment, it would be tuned to several minutes based on clinician input.)*
 4. **Bed exit detected** → `MONITOR` (whether high or low confidence, per the PDF's 0.92 confidence example)
 5. **Very brief walking** (< 3s total) after a detected exit → `MONITOR` (downgraded from confirmed exit to potential repositioning)
 6. **Person lying horizontally, but not confidently on the bed** (e.g. low bed overlap) → `MONITOR` (activity cannot be confidently determined)
@@ -165,7 +253,7 @@ the pattern match.
 Evaluated across all 13 test clips, scoring predicted output against hand-labeled ground truth.
 
 ### State Classification
-- **Overall accuracy: 64.4%** (253/393 sampled frames, at the same 0.5s interval used throughout the pipeline)
+- **Overall accuracy: 63.8%** (247/387 sampled frames, at the same 0.5s interval used throughout the pipeline)
 - **Confusion Matrix Highlights**: Note the confusion between `SITTING_ON_BED` and `SITTING_OUTSIDE_BED` (e.g. 23 SITTING_OUTSIDE_BED correctly identified, but 2 misclassified as SITTING_ON_BED and 4 as STANDING). The tracker uses a 2D heuristic, causing some ambiguity at the bed's border.
 - **Most LYING_IN_BED errors are UNKNOWN, not a wrong state** — 53 misclassifications are the system correctly refusing to guess during occlusion (blanket coverage, person rolling onto their side) rather than a detection error.
 - Example failure cases and the full confusion matrix are exported to `outputs/evaluation_report.json`.
@@ -185,7 +273,7 @@ Average absolute error in duration calculation compared to ground truth:
 | sitting_on_bed | 1.12s |
 | walking | 1.35s |
 | lying_in_bed | 2.38s |
-| unknown | 3.85s |
+| unknown | 3.62s |
 
 This matches the PDF's own duration-error example format closely (e.g.
 "Lying duration error: 8 sec") and is comparable or better.
