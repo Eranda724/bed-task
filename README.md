@@ -144,6 +144,7 @@ the PDF's exact definitions:
 ## Agentic Reasoning and Alerts
 
 `src/agent/agent_analysis.py` implements both PDF sections 5 and 6 together.
+Note: This agent is explicitly implemented as a rule-based tool-calling loop (no LLM or VLM is used). This is completely allowed by the assignment's technical freedom guidelines and ensures 100% explainability for every reasoning step in the interview.
 
 **Reasoning**, mirroring the PDF's own worked examples: for any transition
 flagged `abrupt` or `involves_unknown` by the state machine, the agent

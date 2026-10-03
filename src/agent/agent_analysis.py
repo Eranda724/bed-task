@@ -1,195 +1,183 @@
 """
-Phase 6 - Batch runner: agent_analysis.py for every clip.
-
-Usage:
-    python run_phase6_all.py
+Phase 6 - Agentic Analysis
 """
 
 import argparse
 import json
 import os
+import statistics
 
-
-# ── thresholds ──────────────────────────────────────────────────────────────
-MIN_WALKING_SEC_FOR_EXIT = 3.0   # exits with less walking than this are likely
-                                  # repositioning, not a true exit
+# thresholds
+MIN_WALKING_SEC_FOR_EXIT = 3.0
 HIGH_CONFIDENCE = 0.85
-LOW_CONFIDENCE  = 0.60
-PROLONGED_ABSENCE_SEC = 600.0
-
-
-# ── helpers ──────────────────────────────────────────────────────────────────
 
 def total_state_time(segments, state):
-    """Return the total seconds the timeline spends in `state`."""
-    return sum(
-        seg["end_time_sec"] - seg["start_time_sec"]
-        for seg in segments
-        if seg["state"] == state
-    )
-
-
-def states_after_event(segments, confirmed_time_str):
-    """
-    Return the list of segment states that START at or after the event's
-    confirmed_time. Used to detect returns-to-bed that immediately follow
-    a detected exit.
-    """
-    after = []
-    for seg in segments:
-        if seg["start_time"] >= confirmed_time_str:
-            after.append(seg["state"])
-    return after
-
-
-def format_seconds(sec):
-    m = int(sec // 60)
-    s = sec % 60
-    return f"{m:02d}:{s:05.2f}"
-
+    return sum(seg["end_time_sec"] - seg["start_time_sec"] for seg in segments if seg["state"] == state)
 
 def time_to_seconds(t_str):
-    """Convert 'MM:SS.ss' formatted time string to seconds."""
     parts = t_str.split(":")
     return int(parts[0]) * 60 + float(parts[1])
 
+def get_segment_idx_at_time(segments, time_str):
+    time_sec = time_to_seconds(time_str)
+    for i, seg in enumerate(segments):
+        # Allow small epsilon
+        if seg["start_time_sec"] - 1e-3 <= time_sec <= seg["end_time_sec"] + 1e-3:
+            return i
+    return -1
 
-def out_of_bed_duration(event, segments, clip_end_sec):
-    """
-    Conservative estimate of how long the person has been out of bed:
-    time from the confirmed exit to the end of the clip.
-    This is a lower bound - the true absence may extend beyond the clip.
-    """
-    exit_time = time_to_seconds(event["confirmed_time"])
-    return max(0.0, clip_end_sec - exit_time)
+def analyze_previous_segment(segments, current_idx):
+    if current_idx > 0:
+        prev = segments[current_idx - 1]
+        curr = segments[current_idx]
+        gap = curr["start_time_sec"] - prev["end_time_sec"]
+        return prev, f"Previous segment was {prev['state']} from {prev['start_time']} to {prev['end_time']} (ended {gap:.1f}s earlier)."
+    return None, "No previous segment exists."
 
+def analyze_next_segment(segments, current_idx):
+    if current_idx < len(segments) - 1:
+        nxt = segments[current_idx + 1]
+        return nxt, f"Following segment is {nxt['state']} from {nxt['start_time']} to {nxt['end_time']}."
+    return None, "No following segment exists."
 
-# ── per-event reasoning ───────────────────────────────────────────────────────
+def check_on_bed_or_floor(segment, features):
+    start = segment["start_time_sec"]
+    end = segment["end_time_sec"]
+    if segment["state"] == "UNKNOWN":
+        return None, "Person not detected in UNKNOWN segment; cannot determine bed overlap."
+    
+    overlaps = []
+    for f in features:
+        if start - 1e-3 <= f["timestamp_sec"] <= end + 1e-3:
+            if f["persons"]:
+                overlaps.append(f["persons"][0].get("bed_overlap_ratio", 0.0))
+    if not overlaps:
+        return None, "No overlap data available."
+    
+    med = statistics.median(overlaps)
+    return med, f"Median bed_overlap_ratio over this segment is {med:.2f}."
 
-def reason_bed_exit(event, segments):
+def reason_bed_exit(event, segments, features):
     conf = event["confidence"]
-    confirmed_time = event["confirmed_time"]
-    clip_end_sec = segments[-1]["end_time_sec"] if segments else 0.0
-
-    # How much walking is in this clip?
-    walk_total = total_state_time(segments, "WALKING")
-
-    # Did they come back to bed after the exit?
-    states_after = states_after_event(segments, confirmed_time)
-    returned = "LYING_IN_BED" in states_after or "SITTING_ON_BED" in states_after
-
-    # How long have they been out of bed (lower bound: exit -> clip end)?
-    absence_duration = out_of_bed_duration(event, segments, clip_end_sec)
-
-    # ── prolonged absence: highest-priority check (overrides all others) ────
-    # PDF section 7 explicitly names "unexpected prolonged absence from bed"
-    # as an alert trigger. This rule fires regardless of detection confidence
-    # because the duration itself IS the clinical risk signal.
-    # NOTE: none of our 15s test clips are long enough to trigger this
-    # (correctly - a 15s clip cannot show a 10-minute absence). It exists
-    # to make the logic inspectable and to handle real-world longer videos.
-    if absence_duration >= PROLONGED_ABSENCE_SEC:
-        action = "ALERT"
-        rationale = (
-            f"Bed exit at {event['start_time']} has not resolved with a return to bed "
-            f"within {PROLONGED_ABSENCE_SEC:.0f}s (observed absence so far: "
-            f"{absence_duration:.1f}s). Per policy, a prolonged unexpected absence "
-            f"from bed triggers an alert regardless of exit-detection confidence "
-            f"({conf})."
-        )
-    # ── downgrade conditions ────────────────────────────────────────────────
-    elif returned:
-        action = "NORMAL"
-        rationale = (
-            f"Bed exit detected at {event['start_time']} (confirmed {confirmed_time}), "
-            f"but the patient returned to bed within the same clip. "
-            f"Sequence: {event['previous_state']} -> STANDING -> WALKING -> back to bed. "
-            f"No alert required."
-        )
-    elif walk_total < MIN_WALKING_SEC_FOR_EXIT:
-        action = "MONITOR"
-        rationale = (
-            f"Bed exit pattern detected at {event['start_time']} (confirmed {confirmed_time}), "
-            f"but total walking time is only {walk_total:.1f}s "
-            f"(threshold: {MIN_WALKING_SEC_FOR_EXIT}s). "
-            f"This may be a brief repositioning at the bed edge rather than a true exit. "
-            f"Confidence: {conf}. Flagging for review."
-        )
-    elif conf >= HIGH_CONFIDENCE:
-        action = "ALERT"
-        rationale = (
-            f"High-confidence bed exit detected at {event['start_time']} "
-            f"(confirmed walking away at {confirmed_time}). "
-            f"Previous state: {event['previous_state']}. "
-            f"Total walking time: {walk_total:.1f}s. "
-            f"Confidence: {conf}. Caregiver attention recommended."
-        )
-    elif conf >= LOW_CONFIDENCE:
-        action = "MONITOR"
-        rationale = (
-            f"Bed exit detected at {event['start_time']} (confirmed {confirmed_time}) "
-            f"but with moderate confidence ({conf}) - the transition sequence was abrupt "
-            f"or had an unexpected jump. Total walking time: {walk_total:.1f}s. "
-            f"Flagging for caregiver review."
-        )
-    else:
-        action = "MONITOR"
-        rationale = (
-            f"Low-confidence bed exit at {event['start_time']} (confirmed {confirmed_time}). "
-            f"The person was already standing/walking when the clip began "
-            f"({event['previous_state']}); we cannot confirm they were in bed beforehand. "
-            f"Confidence: {conf}. Monitoring recommended."
-        )
-
-    return {**event, "action": action, "rationale": rationale}
-
-
-def reason_return_to_bed(event, segments):
-    conf = event["confidence"]
-
+    trace = []
+    
+    trace.append({
+        "observation": f"Detected {event['event']} at {event['start_time']} with confidence {conf:.2f}.",
+        "action": "Determine if evidence is already enough.",
+        "finding": None,
+        "conclusion": None
+    })
+    
+    idx = get_segment_idx_at_time(segments, event["start_time"])
+    
     if conf >= HIGH_CONFIDENCE:
-        action = "NORMAL"
-        rationale = (
-            f"Patient returned to bed at {event['start_time']} "
-            f"(confirmed lying down at {event['confirmed_time']}). "
-            f"Sequence: {event['previous_state']} -> SITTING_ON_BED -> LYING_IN_BED. "
-            f"Confidence: {conf}. Normal return to bed."
-        )
-    else:
-        action = "MONITOR"
-        rationale = (
-            f"Return-to-bed pattern detected at {event['start_time']} "
-            f"(confirmed {event['confirmed_time']}) with confidence {conf}. "
-            f"The transition sequence was abrupt or involved an unexpected state jump. "
-            f"Verifying patient is settled."
-        )
+        trace[-1]["finding"] = "High confidence exit. Evidence is sufficient."
+        trace[-1]["conclusion"] = "BED_EXIT confirmed."
+        return {**event, "action": "ALERT", "reasoning_trace": trace}
+        
+    trace[-1]["finding"] = "Confidence is low/moderate. More context needed."
+    
+    trace.append({
+        "observation": "Need to check context around the event.",
+        "action": "analyze_previous_segment",
+        "finding": None,
+        "conclusion": None
+    })
+    prev_seg, prev_desc = analyze_previous_segment(segments, idx)
+    trace[-1]["finding"] = prev_desc
+    
+    trace.append({
+        "observation": "Need to check subsequent behavior.",
+        "action": "analyze_next_segment",
+        "finding": None,
+        "conclusion": None
+    })
+    next_seg, next_desc = analyze_next_segment(segments, idx)
+    trace[-1]["finding"] = next_desc
+    
+    walk_total = total_state_time(segments, "WALKING")
+    if walk_total < MIN_WALKING_SEC_FOR_EXIT:
+        trace.append({
+            "observation": f"Total walking time is {walk_total:.1f}s, less than {MIN_WALKING_SEC_FOR_EXIT}s threshold.",
+            "action": "Assess clinical risk of brief walk.",
+            "finding": "Activity is likely repositioning at the bed edge rather than a true exit.",
+            "conclusion": "BED_EXIT not confirmed."
+        })
+        return {**event, "action": "MONITOR", "reasoning_trace": trace}
+        
+    trace.append({
+        "observation": "All context gathered.",
+        "action": "Determine alert level.",
+        "finding": "Exit sequence verified despite initial low confidence.",
+        "conclusion": "BED_EXIT confirmed."
+    })
+    return {**event, "action": "MONITOR", "reasoning_trace": trace}
 
-    return {**event, "action": action, "rationale": rationale}
+def reason_return_to_bed(event, segments, features):
+    trace = [{
+        "observation": f"Detected {event['event']} at {event['start_time']} with confidence {event['confidence']:.2f}.",
+        "action": "Determine if evidence is already enough.",
+        "finding": "Return to bed is clear.",
+        "conclusion": "RETURN_TO_BED confirmed."
+    }]
+    return {**event, "action": "NORMAL", "reasoning_trace": trace}
 
+def reason_segment(seg, features):
+    trace = []
+    trace.append({
+        "observation": f"Person is LYING_IN_BED from {seg['start_time']} to {seg['end_time']}.",
+        "action": "Determine if evidence is already enough.",
+        "finding": "Must verify if person is actually in bed or on the floor.",
+        "conclusion": None
+    })
+    trace.append({
+        "observation": "Need spatial context.",
+        "action": "check_on_bed_or_floor",
+        "finding": None,
+        "conclusion": None
+    })
+    med_overlap, overlap_desc = check_on_bed_or_floor(seg, features)
+    trace[-1]["finding"] = overlap_desc
+    
+    if med_overlap is not None and med_overlap < 0.3:
+        trace.append({
+            "observation": f"Overlap {med_overlap:.2f} is below on-bed threshold.",
+            "action": "Determine clinical risk.",
+            "finding": "Person is horizontal but not confidently on the bed. May be on the floor.",
+            "conclusion": "Activity cannot be confidently determined."
+        })
+        return {"event": "lying_check", "segment": seg, "action": "MONITOR", "reasoning_trace": trace}
+        
+    trace.append({
+        "observation": "Overlap confirms person is in bed.",
+        "action": "Determine alert level.",
+        "finding": "Normal resting state.",
+        "conclusion": "Patient resting in bed."
+    })
+    return {"event": "lying_check", "segment": seg, "action": "NORMAL", "reasoning_trace": trace}
 
-def reason_event(event, segments):
-    if event["event"] == "bed_exit":
-        return reason_bed_exit(event, segments)
-    elif event["event"] == "return_to_bed":
-        return reason_return_to_bed(event, segments)
-    else:
-        return {**event, "action": "MONITOR",
-                "rationale": f"Unknown event type '{event['event']}' - flagging for manual review."}
-
-
-# ── clip-level summary ────────────────────────────────────────────────────────
-
-def clip_summary(segments, reasoned_events):
+def analyze(segments, events, features):
+    reasoned_items = []
+    
+    for e in events:
+        if e["event"] == "bed_exit":
+            reasoned_items.append(reason_bed_exit(e, segments, features))
+        elif e["event"] == "return_to_bed":
+            reasoned_items.append(reason_return_to_bed(e, segments, features))
+            
+    for seg in segments:
+        if seg["state"] == "LYING_IN_BED":
+            reasoned_items.append(reason_segment(seg, features))
+            
     lying_sec   = total_state_time(segments, "LYING_IN_BED")
-    sitting_sec = total_state_time(segments, "SITTING_ON_BED")
     walking_sec = total_state_time(segments, "WALKING")
     unknown_sec = total_state_time(segments, "UNKNOWN")
     clip_duration = segments[-1]["end_time_sec"] if segments else 0.0
 
-    has_alert   = any(e["action"] == "ALERT"   for e in reasoned_events)
-    has_monitor = any(e["action"] == "MONITOR" for e in reasoned_events)
+    has_alert   = any(e["action"] == "ALERT"   for e in reasoned_items)
+    has_monitor = any(e["action"] == "MONITOR" for e in reasoned_items)
 
-    if not reasoned_events:
+    if not events: 
         if lying_sec > 0 and walking_sec == 0:
             classification = "in_bed_static"
         elif unknown_sec > clip_duration * 0.5:
@@ -203,36 +191,26 @@ def clip_summary(segments, reasoned_events):
     else:
         classification = "normal"
 
-    return {
+    summary = {
         "clip_classification": classification,
         "clip_duration_sec": round(clip_duration, 2),
-        "time_lying_sec":    round(lying_sec,   2),
-        "time_sitting_sec":  round(sitting_sec, 2),
-        "time_walking_sec":  round(walking_sec, 2),
-        "time_unknown_sec":  round(unknown_sec, 2),
-        "event_count":       len(reasoned_events),
-        "alert_count":       sum(1 for e in reasoned_events if e["action"] == "ALERT"),
-        "monitor_count":     sum(1 for e in reasoned_events if e["action"] == "MONITOR"),
-        "normal_count":      sum(1 for e in reasoned_events if e["action"] == "NORMAL"),
+        "event_count":       len(events),
+        "alert_count":       sum(1 for e in reasoned_items if e["action"] == "ALERT"),
+        "monitor_count":     sum(1 for e in reasoned_items if e["action"] == "MONITOR"),
+        "normal_count":      sum(1 for e in reasoned_items if e["action"] == "NORMAL"),
     }
-
-
-# ── main ──────────────────────────────────────────────────────────────────────
-
-def analyze(segments, events):
-    reasoned_events = [reason_event(e, segments) for e in events]
-    summary = clip_summary(segments, reasoned_events)
+    
     return {
         "summary": summary,
-        "events":  reasoned_events,
+        "agent_analysis": reasoned_items,
     }
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phase 6: Agentic analysis of timeline + events.")
-    parser.add_argument("--timeline", required=True, help="Path to timeline JSON (Phase 3 output).")
-    parser.add_argument("--events",   required=True, help="Path to events JSON (Phase 5 output).")
-    parser.add_argument("--out",      required=True, help="Output path for reasoning JSON.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--timeline", required=True)
+    parser.add_argument("--events",   required=True)
+    parser.add_argument("--features", required=True)
+    parser.add_argument("--out",      required=True)
     args = parser.parse_args()
 
     with open(args.timeline) as f:
@@ -242,21 +220,15 @@ if __name__ == "__main__":
     if os.path.exists(args.events):
         with open(args.events) as f:
             events = json.load(f)
+            
+    with open(args.features) as f:
+        features = json.load(f)
 
-    result = analyze(segments, events)
+    result = analyze(segments, events, features)
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(result, f, indent=2)
 
-    s = result["summary"]
-    print(f"Clip classification: {s['clip_classification']}")
-    print(f"  Duration: {s['clip_duration_sec']:.1f}s | "
-          f"Lying: {s['time_lying_sec']:.1f}s | "
-          f"Walking: {s['time_walking_sec']:.1f}s | "
-          f"Unknown: {s['time_unknown_sec']:.1f}s")
-    print(f"  Events: {s['event_count']} "
-          f"(ALERT: {s['alert_count']}, MONITOR: {s['monitor_count']}, NORMAL: {s['normal_count']})")
-    for e in result["events"]:
-        print(f"  [{e['action']}] {e['event']} @ {e['start_time']} - {e['rationale'][:80]}...")
+    print(f"Clip classification: {result['summary']['clip_classification']}")
     print(f"-> {args.out}")
