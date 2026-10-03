@@ -42,13 +42,14 @@ def format_duration(seconds):
 def summarize(segments):
     durations_sec = {state: 0.0 for state in ALL_STATES}
     total_time = 0.0
+    if segments:
+        total_time = segments[-1]["end_time_sec"] - segments[0]["start_time_sec"]
 
     for seg in segments:
         duration = max(0.0, seg["end_time_sec"] - seg["start_time_sec"])
         key = seg["state"].lower()
         if key in durations_sec:
             durations_sec[key] += duration
-        total_time += duration
 
     in_bed_sec = durations_sec["lying_in_bed"] + durations_sec["sitting_on_bed"]
     out_of_bed_sec = (durations_sec["sitting_outside_bed"] + durations_sec["standing"]

@@ -172,10 +172,19 @@ def remove_flicker(sequence, min_frames=MIN_FRAMES_TO_CONFIRM):
 
     return sequence
 
-def build_segments(sequence):
+def build_segments(sequence, clip_end_sec=None):
     """
     Merges consecutive identical states into segments with start/end times.
     This is the core timeline format (PDF section 4).
+
+    Each segment's end_time_sec is set to the next segment's start_time_sec so
+    that segments tile the observed period without gaps (previously the end was
+    the last *detected frame* inside the segment, leaving a 0.5s hole at every
+    boundary equal to the sampling interval).
+
+    The final segment extends to clip_end_sec (the timestamp of the last sampled
+    frame). If the last detection is earlier than clip_end_sec, an UNKNOWN
+    segment is appended to cover the remaining tail.
     """
     if not sequence:
         return []
@@ -183,24 +192,40 @@ def build_segments(sequence):
     segments = []
     current_state = sequence[0]["state"]
     current_start = sequence[0]["timestamp_sec"]
-    last_timestamp = sequence[0]["timestamp_sec"]
 
     for entry in sequence[1:]:
         if entry["state"] != current_state:
             segments.append({
                 "state": current_state,
                 "start_time_sec": current_start,
-                "end_time_sec": last_timestamp,
+                "end_time_sec": entry["timestamp_sec"],  # end = next segment's start; no gap
             })
             current_state = entry["state"]
             current_start = entry["timestamp_sec"]
-        last_timestamp = entry["timestamp_sec"]
 
+    # Last segment: extend to the true clip end
+    last_detected = sequence[-1]["timestamp_sec"]
+    true_end = clip_end_sec if clip_end_sec is not None else last_detected
     segments.append({
         "state": current_state,
         "start_time_sec": current_start,
-        "end_time_sec": last_timestamp,
+        "end_time_sec": true_end,
     })
+
+    # If detection ended before the clip end, append an explicit UNKNOWN tail
+    if clip_end_sec is not None and last_detected < clip_end_sec - 1e-6:
+        # The last segment already ends at true_end — but only if the last state
+        # wasn't already covering all the way to true_end above. We need to
+        # split: the last detected segment ends at last_detected, then UNKNOWN
+        # covers last_detected → true_end.
+        if current_state != "UNKNOWN":
+            segments[-1]["end_time_sec"] = last_detected  # shrink back to last detection
+            segments.append({
+                "state": "UNKNOWN",
+                "start_time_sec": last_detected,
+                "end_time_sec": true_end,
+            })
+        # If last state was already UNKNOWN, it already extends to true_end; fine.
 
     return segments
 
@@ -261,11 +286,17 @@ def _compute_bed_centroid(candidates_data):
 
 
 def process(candidates_data, bed_centroid=None):
+    # Determine the true clip end from the last sampled frame in the candidates.
+    # This is used to extend the final timeline segment all the way to the end
+    # of the video, and to fill any post-detection gap with UNKNOWN.
+    clip_end_sec = None
+    if candidates_data:
+        clip_end_sec = max(f["timestamp_sec"] for f in candidates_data)
+
     sequence = extract_primary_sequence(candidates_data, bed_centroid)
     sequence = remove_flicker(sequence)
-    segments = build_segments(sequence)
+    segments = build_segments(sequence, clip_end_sec=clip_end_sec)
     segments = flag_transitions(segments)
-    ...
     for seg in segments:
         seg["start_time"] = format_timestamp(seg["start_time_sec"])
         seg["end_time"] = format_timestamp(seg["end_time_sec"])
