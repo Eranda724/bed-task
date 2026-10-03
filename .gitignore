@@ -21,7 +21,7 @@ data/videos/
 *.mkv
 
 # Generated outputs (large, regenerable from videos + code)
-outputs/
+/outputs/
 
 # OS-specific junk
 .DS_Store
