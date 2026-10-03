@@ -23,8 +23,9 @@ def main():
     for timeline_path in timeline_files:
         base = os.path.basename(timeline_path).replace("_timeline.json", "")
         out_path = os.path.join("outputs", "summary", f"{base}_summary.json")
+        events_path = os.path.join("outputs", "events", f"{base}_events.json")
         run(["python", "src/outputs/duration_summary.py",
-             "--timeline", timeline_path, "--out", out_path])
+             "--timeline", timeline_path, "--events", events_path, "--out", out_path])
 
     print("\nAll clips processed through Phase 4.")
 

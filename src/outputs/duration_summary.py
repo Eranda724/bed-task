@@ -39,9 +39,20 @@ def format_duration(seconds):
     return f"{m}m {s:02d}s"
 
 
-def summarize(segments):
+def summarize(segments, events=None):
     durations_sec = {state: 0.0 for state in ALL_STATES}
     total_time = 0.0
+    bed_exit_count = 0
+    bed_return_count = 0
+    longest_out_of_bed_period_sec = 0.0
+    current_out = 0.0
+
+    if events:
+        for e in events:
+            if e.get("event") == "bed_exit":
+                bed_exit_count += 1
+            elif e.get("event") == "return_to_bed":
+                bed_return_count += 1
     if segments:
         total_time = segments[-1]["end_time_sec"] - segments[0]["start_time_sec"]
 
@@ -50,6 +61,12 @@ def summarize(segments):
         key = seg["state"].lower()
         if key in durations_sec:
             durations_sec[key] += duration
+
+        if seg["state"] in OUT_OF_BED_STATES:
+            current_out += duration
+            longest_out_of_bed_period_sec = max(longest_out_of_bed_period_sec, current_out)
+        else:
+            current_out = 0.0
 
     in_bed_sec = durations_sec["lying_in_bed"] + durations_sec["sitting_on_bed"]
     out_of_bed_sec = (durations_sec["sitting_outside_bed"] + durations_sec["standing"]
@@ -71,10 +88,14 @@ def summarize(segments):
             "time_in_bed": format_duration(in_bed_sec),
             "time_out_of_bed": format_duration(out_of_bed_sec),
             "time_unknown": format_duration(durations_sec["unknown"]),
+            "bed_exit_count": bed_exit_count,
         },
         "total_in_bed_sec": round(in_bed_sec, 2),
         "total_out_of_bed_sec": round(out_of_bed_sec, 2),
         "total_unknown_sec": round(durations_sec["unknown"], 2),
+        "longest_out_of_bed_period_sec": round(longest_out_of_bed_period_sec, 2),
+        "bed_exit_count": bed_exit_count,
+        "bed_return_count": bed_return_count,
         "final_state": segments[-1]["state"] if segments else "UNKNOWN",
     }
     return result
@@ -84,12 +105,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute duration summary from a timeline.")
     parser.add_argument("--timeline", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--events", default=None, help="Path to events JSON (from Phase 5)")
     args = parser.parse_args()
 
     with open(args.timeline) as f:
         segments = json.load(f)
 
-    result = summarize(segments)
+    events = None
+    if args.events and os.path.exists(args.events):
+        with open(args.events) as f:
+            events = json.load(f)
+
+    result = summarize(segments, events)
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
