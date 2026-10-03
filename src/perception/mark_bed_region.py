@@ -1,12 +1,7 @@
 """
-Phase 1 - Step 3: Bed region annotation
-
+Bed region annotation tool.
 Opens the first frame of a video and lets you click 4 points to define the
-bed's polygon. This is a manual, one-time-per-video step rather than a
-trained bed-detector model. The PDF allows this level of technical freedom
-("bed-region detection" is listed as an option, not a requirement to train
-a model), and a fixed camera + manual polygon is simple, reliable, and easy
-to justify/explain in an interview - no bed-detector training needed.
+bed's polygon. This is a manual, one-time-per-video step.
 
 Controls:
     - Left click: add a point (click 4 corners of the bed area, in order)

@@ -1,24 +1,7 @@
 """
-Phase 2 - Per-frame evidence extraction
-
-Converts raw pose keypoints (from Phase 1) into meaningful numeric signals
-per frame, per tracked person:
-    - torso_angle_deg: angle of shoulder-to-hip line vs vertical
-      (0 = upright, 90 = horizontal/lying)
-    - height_width_ratio: bounding box height / width
-      (low = lying/spread, high = standing/sitting upright)
-    - bed_overlap_ratio: fraction of person's box area overlapping bed polygon
-    - motion_speed: pixel distance moved by body center since previous frame
-    - visibility_score: average confidence across all keypoints
-      (low score -> frame is unreliable -> should become UNKNOWN later)
-
-These signals are what Phase 3's state machine will threshold against,
-instead of trying to classify raw pixels directly.
-
-Usage:
-    python compute_features.py --pose_json outputs/pose/case05_leaving_bed_pose.json \
-                                --bed_region data/bed_regions/case05_leaving_bed.json \
-                                --out outputs/features/case05_leaving_bed_features.json
+Per-frame evidence extraction.
+Converts raw pose keypoints into meaningful numeric signals per frame, 
+per tracked person (e.g., torso angle, height-width ratio, bed overlap).
 """
 
 import argparse
@@ -46,9 +29,8 @@ def midpoint(kp1, kp2):
 
 def compute_torso_angle(person):
     """
-    Angle of the shoulder-midpoint -> hip-midpoint line, measured from
-    vertical (0 = perfectly upright/vertical, 90 = perfectly horizontal).
-    Returns None if shoulders/hips aren't confidently detected.
+    Angle of the shoulder-midpoint to hip-midpoint line from vertical.
+    (0 = perfectly upright, 90 = perfectly horizontal).
     """
     l_sh = get_keypoint(person, "left_shoulder")
     r_sh = get_keypoint(person, "right_shoulder")
@@ -82,9 +64,7 @@ def compute_height_width_ratio(box_xyxy):
 def compute_bed_overlap_ratio(box_xyxy, bed_polygon):
     """
     Approximates overlap using the bed polygon's bounding rectangle
-    intersected with the person's box. Simple and explainable rather
-    than exact polygon clipping - sufficient given our bed polygon is
-    roughly rectangular (4 corners).
+    intersected with the person's bounding box.
     """
     if not bed_polygon:
         return None
@@ -162,10 +142,8 @@ def compute_features(pose_data, bed_polygon):
             bed_overlap = compute_bed_overlap_ratio(box, bed_polygon)
             visibility = compute_visibility_score(person)
 
-            # Hip-point test: more reliable than whole-box overlap for
-            # telling on-bed vs off-bed, since sitting upright raises the
-            # box well above the bed's flat footprint while the hips stay
-            # roughly where the body contacts the bed surface.
+            # Use hip midpoint to determine on-bed vs off-bed,
+            # as it more accurately reflects bed contact.
             l_hip = get_keypoint(person, "left_hip")
             r_hip = get_keypoint(person, "right_hip")
             hip_mid = midpoint(l_hip, r_hip)

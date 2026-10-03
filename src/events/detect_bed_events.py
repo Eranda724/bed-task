@@ -1,40 +1,6 @@
 """
-Phase 5 - Bed exit / return event detection
-
-Scans a clip's timeline segments (Phase 3 output) for the specific
-sequence patterns the PDF defines in section 2:
-
-    BED_EXIT:
-        (LYING_IN_BED or SITTING_ON_BED) -> STANDING -> WALKING (moving away)
-        Only confirmed once WALKING is observed - a brief STANDING that
-        goes straight back to a bed state does NOT count (PDF: "sitting up
-        or changing sleeping position should not count as a bed exit").
-
-    RETURN_TO_BED:
-        An out-of-bed state (WALKING / STANDING / SITTING_OUTSIDE_BED /
-        OUT_OF_BED) -> SITTING_ON_BED -> LYING_IN_BED
-        Confirmed once LYING_IN_BED is reached, matching the PDF's exact
-        return sequence (approaches -> sits -> lies down).
-
-Produces events in the PDF section 7 format:
-    {
-        "event": "bed_exit",
-        "start_time": "...",
-        "confirmed_time": "...",
-        "previous_state": "...",
-        "current_state": "...",
-        "confidence": ...,
-        "decision": "..."
-    }
-
-Confidence is a simple heuristic here (not a model output): based on
-whether the transition_flag from Phase 3 was "expected" (higher
-confidence) or "abrupt"/"involves_unknown" (lower confidence, since the
-sequence had a gap or unusual jump).
-
-Usage:
-    python detect_bed_events.py --timeline outputs/timeline/case05_leaving_bed_timeline.json \
-                                 --out outputs/events/case05_leaving_bed_events.json
+Bed exit and return event detection.
+Scans timeline segments for the specific sequence patterns for bed exits and returns.
 """
 
 import argparse
@@ -62,8 +28,7 @@ def confidence_for_segment(segment):
 def detect_bed_exits(segments):
     """
     Looks for: IN_BED_STATE -> STANDING -> WALKING
-    Confirmed at the moment WALKING begins (person is actually moving away,
-    not just standing beside the bed).
+    Confirmed at the moment WALKING begins.
     """
     events = []
     for i in range(len(segments) - 2):
@@ -81,7 +46,7 @@ def detect_bed_exits(segments):
                 "previous_state": seg_bed["state"],
                 "current_state": seg_walking["state"],
                 "confidence": confidence_for_segment(seg_walking),
-                "decision": "MONITOR",  # Phase 7 will refine this
+                "decision": "MONITOR"
             })
     return events
 
@@ -94,18 +59,9 @@ MIN_IN_BED_SEC_FOR_DIRECT_EXIT = 1.5  # the IN_BED segment must have lasted at
 
 def detect_bed_exits_direct(segments):
     """
-    Secondary two-step pattern: IN_BED_STATE -> WALKING (no STANDING).
-
-    Physically possible when a patient swings their legs off the bed and
-    immediately starts walking without pausing upright first (e.g. poor
-    lighting clips where STANDING is brief and misclassified, as in case12).
-
-    Guard: the IN_BED segment must last >= MIN_IN_BED_SEC_FOR_DIRECT_EXIT to
-    exclude short flicker misclassifications at the bed edge (e.g. case04,
-    where SITTING_ON_BED lasted only 0.5s before WALKING).
-
-    Confidence is capped at 0.70 because the absent STANDING step means
-    we have one fewer piece of confirming evidence.
+    Fallback pattern: IN_BED_STATE -> WALKING (skipping STANDING).
+    Only valid if IN_BED segment lasted >= MIN_IN_BED_SEC_FOR_DIRECT_EXIT.
+    Confidence is capped at 0.70 due to the missing intermediate state.
     """
     events = []
     for i in range(len(segments) - 1):
@@ -132,13 +88,9 @@ def detect_bed_exits_direct(segments):
 
 def detect_bed_exits_from_clip_start(segments, first_segment_near_bed):
     """
-    Secondary, lower-confidence pattern: if the clip's very FIRST segment
-    is already STANDING (no prior bed state was captured on camera) and
-    immediately followed by WALKING, this MAY be a bed exit already in
-    progress when recording began - but only if the person was actually
-    near the bed at that point. Without this check, a person simply
-    walking INTO the room from the door (e.g. case06, case07) would be
-    wrongly flagged as exiting a bed they were never near.
+    Fallback pattern: Initial STANDING -> WALKING.
+    Checks if person started near the bed when recording began, otherwise
+    ignores to prevent flagging someone simply walking into the room.
     """
     events = []
     if len(segments) >= 2 and first_segment_near_bed:
@@ -176,7 +128,7 @@ def detect_bed_returns(segments):
                 "previous_state": seg_out["state"],
                 "current_state": seg_lying["state"],
                 "confidence": confidence_for_segment(seg_lying),
-                "decision": "NORMAL",  # Phase 7 will refine this
+                "decision": "NORMAL"
             })
     return events
 
@@ -217,12 +169,12 @@ def detect_events(segments, features_data=None, bed_centroid=None):
     events = detect_bed_exits(segments) + detect_bed_returns(segments)
 
     if not any(e["event"] == "bed_exit" for e in events):
-        # Fallback 1: two-step IN_BED -> WALKING (no STANDING intermediate)
+        # IN_BED -> WALKING (no STANDING intermediate)
         # Only fires if the IN_BED segment was long enough to be real (not flicker).
         events += detect_bed_exits_direct(segments)
 
     if not any(e["event"] == "bed_exit" for e in events):
-        # Fallback 2: clip starts already mid-exit (STANDING/WALKING at t=0)
+        # clip starts already mid-exit (STANDING/WALKING at t=0)
         first_segment_near_bed = False
         if features_data is not None and bed_centroid is not None and segments:
             first_segment_near_bed = is_first_segment_near_bed(

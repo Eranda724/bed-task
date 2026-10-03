@@ -1,22 +1,7 @@
 """
-Phase 4 - Duration summaries
-
-Reads a clip's timeline (Phase 3 segments) and produces the activity
-duration summary in the exact format shown in PDF section 3/7:
-    - total observation time
-    - per-state duration (human readable + seconds)
-    - bed_summary: time in bed vs out of bed, bed exit count (placeholder,
-      real counting happens in Phase 5)
-
-"IN_BED" states: LYING_IN_BED, SITTING_ON_BED
-"OUT_OF_BED" states: SITTING_OUTSIDE_BED, STANDING, WALKING, OUT_OF_BED
-UNKNOWN is reported separately, not folded into either bucket, since we
-genuinely don't know the person's bed status during those segments -
-folding it into either side would overstate our confidence.
-
-Usage:
-    python duration_summary.py --timeline outputs/timeline/case05_leaving_bed_timeline.json \
-                                --out outputs/summary/case05_leaving_bed_summary.json
+Duration summaries generator.
+Reads a clip's timeline segments and produces the activity duration summary.
+Calculates total observation time, per-state durations, and bed presence.
 """
 
 import argparse
@@ -105,7 +90,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute duration summary from a timeline.")
     parser.add_argument("--timeline", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--events", default=None, help="Path to events JSON (from Phase 5)")
+    parser.add_argument("--events", default=None, help="Path to events JSON")
     args = parser.parse_args()
 
     with open(args.timeline) as f:

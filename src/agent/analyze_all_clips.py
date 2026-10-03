@@ -1,8 +1,5 @@
 """
-Phase 6 - Batch runner: agent_analysis.py for every clip.
-
-Usage:
-    python run_phase6_all.py
+Batch runner to perform agentic analysis for every clip.
 """
 
 import os
@@ -28,7 +25,7 @@ def main():
         run(["python", "src/agent/agent_analysis.py",
              "--timeline", timeline_path, "--events", events_path, "--features", features_path, "--out", out_path])
 
-    print("\nAll clips processed through Phase 6.")
+    print("\nAgent analysis complete.")
 
 
 if __name__ == "__main__":

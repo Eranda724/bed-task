@@ -1,9 +1,6 @@
 """
-Phase 3 - Batch runner: classify_frames.py + smooth_states.py for every clip
-that has a features JSON.
-
-Usage:
-    python run_phase3_all.py
+Batch runner for state classification and temporal smoothing.
+Generates timeline JSONs for clips that have feature data.
 """
 
 import os
@@ -23,7 +20,7 @@ def main():
 
     for feature_path in feature_files:
         base = os.path.basename(feature_path).replace("_features.json", "")
-        print(f"\n========== Processing {base} ==========")
+        print(f"\nProcessing {base}...")
 
         candidates_path = os.path.join("outputs", "states", f"{base}_candidates.json")
         timeline_path = os.path.join("outputs", "timeline", f"{base}_timeline.json")
@@ -34,7 +31,7 @@ def main():
         run(["python", "src/temporal/smooth_states.py",
              "--candidates", candidates_path, "--bed_region", bed_region_path, "--out", timeline_path])
 
-    print("\nAll clips processed through Phase 3.")
+    print("\nTimeline generation complete.")
 
 
 if __name__ == "__main__":

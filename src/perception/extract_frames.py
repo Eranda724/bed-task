@@ -1,14 +1,6 @@
 """
-Phase 1 - Step 2: Frame extraction
-
-Samples frames from a video at a fixed time interval (default every 0.5s),
-rather than processing every single frame. This matches the PDF's emphasis
-on temporal understanding over independent per-frame classification -
-we only need enough frames to detect state transitions, not a full
-frame-by-frame trace.
-
-Usage:
-    python extract_frames.py --video data/videos/case05_leaving_bed.mp4 --interval 0.5
+Frame extraction tool.
+Samples frames from a video at a fixed time interval (default every 0.5s).
 """
 
 import argparse
@@ -59,8 +51,7 @@ def extract_frames(video_path: str, interval_sec: float, out_dir: str):
 
     cap.release()
 
-    # Save timestamps alongside frames so later stages (pose/tracking)
-    # can recover each frame's real video time without re-reading the video
+    # Save timestamps for later stages
     index_path = os.path.join(out_dir, "frames_index.json")
     with open(index_path, "w") as f:
         json.dump(records, f, indent=2)

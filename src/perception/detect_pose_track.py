@@ -1,33 +1,9 @@
 """
-Phase 1 - Step 4: Person detection + pose estimation + tracking
+Person detection, pose estimation, and tracking.
+Runs YOLOv8-pose on sampled frames to extract bounding boxes, 
+17 body keypoints, and track IDs. Includes custom deduplication 
+to remove overlapping false-positive bounding boxes.
 
-Runs YOLOv8-pose on each sampled frame to get:
-    - person bounding box
-    - 17 body keypoints (COCO format) with per-keypoint confidence
-    - a tracking ID (via Ultralytics' built-in ByteTrack), so the same
-      person keeps the same ID across frames.
-
-Model choice: YOLOv8n-pose (the "nano" variant) - free, open-source,
-combines detection + pose in one pass, chosen for CPU-only inference
-(AMD Radeon 850M has no CUDA support).
-
-Confidence threshold (conf=0.5): filters out low-confidence false
-detections (e.g. rumpled blankets or shadows mistaken for a person).
-
-Deduplication: YOLO occasionally produces two overlapping boxes for one
-body in unusual poses (e.g. fully horizontal lying position) that its own
-NMS doesn't merge. We remove duplicates by keeping only the
-higher-confidence box when two detections overlap heavily.
-
-COCO keypoint order (used by YOLOv8-pose), 17 keypoints:
-    0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear,
-    5: left_shoulder, 6: right_shoulder, 7: left_elbow, 8: right_elbow,
-    9: left_wrist, 10: right_wrist, 11: left_hip, 12: right_hip,
-    13: left_knee, 14: right_knee, 15: left_ankle, 16: right_ankle
-
-Usage:
-    python detect_pose_track.py --frames_dir outputs/frames/case05_leaving_bed \
-                                 --video_name case05_leaving_bed
 """
 
 import argparse
@@ -85,8 +61,7 @@ def deduplicate_persons(persons, iou_threshold=0.5):
 
 def load_frame_index(frames_dir: str):
     """
-    Loads timestamps saved by extract_frames.py (frames_index.json),
-    so each frame's real video time can be attached to its detections.
+    Loads timestamps saved by extract_frames.py (frames_index.json).
     """
     index_path = os.path.join(frames_dir, "frames_index.json")
     if os.path.exists(index_path):

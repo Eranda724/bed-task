@@ -1,5 +1,5 @@
 """
-Phase 6 - Agentic Analysis
+Agentic reasoning analysis to evaluate bed segments and triggers.
 """
 
 import argparse

@@ -1,18 +1,6 @@
 """
-Phase 1 - Step 5: Sanity-check visualization
-
-Draws detected keypoints, skeleton connections, bounding box, track ID,
-and the bed polygon onto sampled frames, and saves them as images.
-
-This step exists because trusting numeric output (keypoint coordinates,
-confidences) without visually confirming it first is how silent bugs slip
-into a pipeline. Cheap to run, catches most integration mistakes early.
-
-Usage:
-    python visualize_pose.py --pose_json outputs/pose/case05_leaving_bed_pose.json \
-                              --frames_dir outputs/frames/case05_leaving_bed \
-                              --bed_region data/bed_regions/case05_leaving_bed.json \
-                              --out_dir outputs/viz/case05_leaving_bed
+Sanity-check visualization for pose and tracking.
+Draws keypoints, skeleton, bounding box, track ID, and bed polygon onto frames.
 """
 
 import argparse
@@ -21,8 +9,7 @@ import os
 import cv2
 import numpy as np
 
-# COCO skeleton connections (pairs of keypoint indices), matching the
-# KEYPOINT_NAMES order used in detect_pose_track.py
+# COCO skeleton connections
 SKELETON = [
     (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),          # arms + shoulders
     (5, 11), (6, 12), (11, 12),                       # torso

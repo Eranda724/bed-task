@@ -1,8 +1,5 @@
 """
-Phase 4 - Batch runner: duration_summary.py for every clip timeline.
-
-Usage:
-    python run_phase4_all.py
+Batch runner to generate duration summaries for every clip timeline.
 """
 
 import os
@@ -27,7 +24,7 @@ def main():
         run(["python", "src/outputs/duration_summary.py",
              "--timeline", timeline_path, "--events", events_path, "--out", out_path])
 
-    print("\nAll clips processed through Phase 4.")
+    print("\nSummary generation complete.")
 
 
 if __name__ == "__main__":

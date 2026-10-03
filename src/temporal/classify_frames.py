@@ -1,23 +1,9 @@
 """
-Phase 3 - Stage A: Per-frame candidate state classification
-
-Converts per-frame features (Phase 2) into a candidate state label per
-frame, using threshold rules derived from observed data:
-    - LYING_IN_BED:        torso_angle > 60 deg, on bed
-    - SITTING_ON_BED:      torso_angle 30-60 deg (or upright+low motion), on bed
-    - SITTING_OUTSIDE_BED: same posture, NOT on bed
-    - STANDING:            torso_angle < 30 deg, low motion, upright ratio
-    - WALKING:             torso_angle < 30 deg, high motion
-    - OUT_OF_BED:          no confident posture read, but recently off-bed
-    - UNKNOWN:             low visibility / no detection / insufficient evidence
-
-This is Stage A only - a per-frame guess. Stage B (temporal smoothing)
-will clean up flicker and enforce valid transitions.
-
-Usage:
-    python classify_frames.py --features outputs/features/case05_leaving_bed_features.json \
-                               --out outputs/states/case05_leaving_bed_candidates.json
+Per-frame candidate state classification.
+Converts per-frame features into a candidate state label per
+frame, using threshold rules derived from observed data.
 """
+
 
 import argparse
 import json
@@ -49,18 +35,10 @@ def classify_single_person(person_features):
     if torso_angle is None or height_width is None:
         return "UNKNOWN", "missing_pose_signal"
 
-    # On-bed decided by EITHER signal confirming it - the hip-point test
-    # is accurate but flickers right at the bed polygon's edge (jittery
-    # pose near a boundary); bed_overlap_ratio is more stable but less
-    # precise when a person sits upright with much of their box above the
-    # bed's flat footprint. Combining with OR uses whichever signal is
-    # more reliable in each situation.
+    # Use OR to combine hip-point and bed-overlap signals for stability.
     on_bed = bool(on_bed_point) or (bed_overlap is not None and bed_overlap >= BED_OVERLAP_ON_BED_MIN)
 
-    # Lying requires BOTH a horizontal torso AND a low, wide box - using
-    # AND (not OR) prevents a single borderline signal from overriding a
-    # clearly contradicting one (e.g. height/width dipping to 0.79 during
-    # a sitting posture while torso_angle correctly shows upright).
+    # Lying requires BOTH a horizontal torso AND a low, wide box.
     if torso_angle >= TORSO_ANGLE_LYING_MIN and height_width <= HEIGHT_WIDTH_LYING_MAX:
         if on_bed:
             return "LYING_IN_BED", "horizontal_on_bed"

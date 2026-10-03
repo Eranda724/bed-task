@@ -1,26 +1,8 @@
 """
-Phase 3 - Stage B: Temporal smoothing and segment building
-
-Takes Stage A's per-frame candidate states and:
-    1. Removes short-lived "flicker" states (a state lasting fewer than
-       MIN_FRAMES_TO_CONFIRM consecutive frames is noise, not a real
-       transition - e.g. one frame misread as STANDING during continuous
-       WALKING due to a brief dip in motion_speed).
-    2. Merges consecutive identical states into clean segments, which
-       directly form the timeline (PDF section 4).
-    3. Flags transitions between segments as "expected" or "abrupt" based
-       on a simple adjacency rule (e.g. LYING_IN_BED -> WALKING with no
-       STANDING in between is physically unusual and worth flagging for
-       the agent to double check in Phase 6).
-
-This only tracks ONE person (the primary tracked person) per clip for now,
-since all current state logic assumes a single patient per frame. Phase 6
-(agentic analysis) will handle multi-person disambiguation for the
-caregiver case.
-
-Usage:
-    python smooth_states.py --candidates outputs/states/case05_leaving_bed_candidates.json \
-                             --out outputs/timeline/case05_leaving_bed_timeline.json
+Temporal smoothing and segment building.
+1. Removes short-lived flicker states (noise).
+2. Merges identical consecutive states into timeline segments.
+3. Flags transitions as 'expected' or 'abrupt' based on adjacency rules.
 """
 
 import argparse
@@ -29,14 +11,11 @@ import os
 import math
 
 
-MIN_FRAMES_TO_CONFIRM = 2  # a state must persist this many consecutive
-                            # frames before we accept it as real, not noise
+MIN_FRAMES_TO_CONFIRM = 2
 MAX_PLAUSIBLE_JUMP_PX = 150
 MAX_DISTANCE_FROM_BED_PX = 220
 
-# States that are physically adjacent / expected to transition directly
-# into each other. Used only to flag abrupt transitions for review, not
-# to block them outright (the agent decides what to do with the flag).
+# Physically adjacent states, used to flag abrupt transitions for review.
 EXPECTED_NEIGHBORS = {
     "LYING_IN_BED": {"SITTING_ON_BED", "UNKNOWN"},
     "SITTING_ON_BED": {"LYING_IN_BED", "STANDING", "SITTING_OUTSIDE_BED", "UNKNOWN"},
@@ -54,9 +33,7 @@ def _distance(p1, p2):
 
 def compute_bed_centroid(bed_polygon):
     """
-    Returns the [x, y] centroid (average of corner points) of the bed
-    polygon, used as a spatial anchor: the patient is expected to stay
-    closer to the bed than a visiting caregiver on average.
+    Returns the [x, y] centroid of the bed polygon.
     """
     if not bed_polygon:
         return None
@@ -66,25 +43,8 @@ def compute_bed_centroid(bed_polygon):
 
 def extract_primary_sequence(candidates_data, bed_centroid=None):
     """
-    Pulls out one state value per frame for the PRIMARY (patient) person.
-
-    Uses two different strategies depending on the clip:
-
-    1. SINGLE-PERSON CLIPS (no frame ever has 2+ simultaneous detections):
-       The vast majority of clips. There's never anyone to disambiguate
-       between, so we simply trust whichever single detection is present
-       each frame. No bed-distance restriction is applied here, since
-       legitimate behavior (walking away from the bed, leaving the room)
-       moves far from the bed by definition - restricting by bed distance
-       would wrongly reject exactly the behavior these clips are meant to
-       test.
-
-    2. MULTI-PERSON CLIPS (at least one frame has 2+ people, e.g. a
-       caregiver scenario): Disambiguation is genuinely needed. Here we
-       anchor to the bed centroid, since the patient is expected to stay
-       closer to the bed, on average, than a visiting caregiver who moves
-       around the room. Frames where even the closest candidate is too far
-       from the bed are marked UNKNOWN rather than guessing.
+    Extracts state sequence for the primary person.
+    Uses bed-anchored disambiguation for multi-person frames.
     """
     has_multiple_people = any(len(f["persons"]) >= 2 for f in candidates_data)
 
@@ -127,10 +87,7 @@ def extract_primary_sequence(candidates_data, bed_centroid=None):
 
 def remove_flicker(sequence, min_frames=MIN_FRAMES_TO_CONFIRM):
     """
-    Collapses any run of identical states shorter than min_frames into
-    a neighboring state. Runs touching the start or end of the clip are
-    now also handled (previously only interior runs were smoothed,
-    missing boundary flicker like a single stray frame at the very end).
+    Collapses short runs of states into neighboring states to remove flicker.
     """
     if len(sequence) < 2:
         return sequence
@@ -175,16 +132,7 @@ def remove_flicker(sequence, min_frames=MIN_FRAMES_TO_CONFIRM):
 def build_segments(sequence, clip_end_sec=None):
     """
     Merges consecutive identical states into segments with start/end times.
-    This is the core timeline format (PDF section 4).
-
-    Each segment's end_time_sec is set to the next segment's start_time_sec so
-    that segments tile the observed period without gaps (previously the end was
-    the last *detected frame* inside the segment, leaving a 0.5s hole at every
-    boundary equal to the sampling interval).
-
-    The final segment extends to clip_end_sec (the timestamp of the last sampled
-    frame). If the last detection is earlier than clip_end_sec, an UNKNOWN
-    segment is appended to cover the remaining tail.
+    Segments tile the observed period without gaps.
     """
     if not sequence:
         return []
@@ -214,10 +162,7 @@ def build_segments(sequence, clip_end_sec=None):
 
     # If detection ended before the clip end, append an explicit UNKNOWN tail
     if clip_end_sec is not None and last_detected < clip_end_sec - 1e-6:
-        # The last segment already ends at true_end — but only if the last state
-        # wasn't already covering all the way to true_end above. We need to
-        # split: the last detected segment ends at last_detected, then UNKNOWN
-        # covers last_detected → true_end.
+        # Split the last segment if we need to append an UNKNOWN tail.
         if current_state != "UNKNOWN":
             segments[-1]["end_time_sec"] = last_detected  # shrink back to last detection
             segments.append({
@@ -225,18 +170,14 @@ def build_segments(sequence, clip_end_sec=None):
                 "start_time_sec": last_detected,
                 "end_time_sec": true_end,
             })
-        # If last state was already UNKNOWN, it already extends to true_end; fine.
+        # If already UNKNOWN, no need to append another.
 
     return segments
 
 
 def flag_transitions(segments):
     """
-    Adds a 'transition_flag' to each segment noting whether the move FROM
-    the previous segment INTO this one is expected or abrupt, based on
-    EXPECTED_NEIGHBORS. This doesn't change the data, just annotates it
-    for Phase 6 (agentic analysis) to use when deciding whether a moment
-    needs more context.
+    Annotates segments with 'expected' or 'abrupt' transition flags based on EXPECTED_NEIGHBORS.
     """
     for i in range(1, len(segments)):
         prev_state = segments[i - 1]["state"]
@@ -263,11 +204,7 @@ def format_timestamp(seconds):
 
 def _compute_bed_centroid(candidates_data):
     """
-    Estimates the bed centroid as the median box_center of all persons whose
-    candidate_state is a bed-related state (LYING_IN_BED, SITTING_ON_BED).
-    Falls back to None if no such detections exist in this clip.
-    This gives a coarse but usually reliable anchor for where the bed is,
-    without needing to pass the full bed polygon into this module.
+    Estimates the bed centroid as the median box_center of bed-related states.
     """
     xs, ys = [], []
     for frame in candidates_data:
@@ -286,9 +223,7 @@ def _compute_bed_centroid(candidates_data):
 
 
 def process(candidates_data, bed_centroid=None):
-    # Determine the true clip end from the last sampled frame in the candidates.
-    # This is used to extend the final timeline segment all the way to the end
-    # of the video, and to fill any post-detection gap with UNKNOWN.
+    # Determine the true clip end to extend the final segment properly.
     clip_end_sec = None
     if candidates_data:
         clip_end_sec = max(f["timestamp_sec"] for f in candidates_data)

@@ -1,13 +1,6 @@
 """
-Runs the full Phase 1 pipeline (extract frames -> pose/track -> visualize)
-on every video in data/videos/, one after another.
-
-Bed region marking is NOT automated here - you still need to run
-mark_bed_region.py manually once per clip, since it requires clicking.
-This script assumes bed region JSONs already exist for each clip.
-
-Usage:
-    python run_phase1_all.py
+Batch process for video perception (frames, pose tracking, visualization).
+Expects bed region JSONs to be manually created via mark_bed_region.py.
 """
 
 import os
@@ -26,11 +19,10 @@ def run(cmd):
 
 def main():
     video_paths = sorted(glob.glob(os.path.join(VIDEOS_DIR, "*.mp4")))
-    video_paths = [v for v in video_paths if "merged_full" not in v]
 
     for video_path in video_paths:
         name = os.path.splitext(os.path.basename(video_path))[0]
-        print(f"\n========== Processing {name} ==========")
+        print(f"\nProcessing {name}...")
 
         bed_region_path = os.path.join(BED_REGIONS_DIR, f"{name}.json")
         if not os.path.exists(bed_region_path):

@@ -1,23 +1,6 @@
 """
-Phase 8 - Evaluation
-
-Compares system output against ground truth across all 13 clips:
-    1. State classification accuracy + confusion matrix (per-frame, sampled
-       at the same 0.5s intervals the pipeline used)
-    2. Bed-exit / return-to-bed precision, recall, false detections
-       (events matched within a time tolerance window)
-    3. Duration error per activity (PDF section 10's exact example format:
-       "Lying duration error: 8 sec" etc.)
-
-Reads:
-    data/ground_truth/<clip>_states.csv
-    data/ground_truth/<clip>_events.csv
-    outputs/timeline/<clip>_timeline.json
-    outputs/events/<clip>_events.json
-    outputs/summary/<clip>_summary.json
-
-Usage:
-    python evaluate.py --clips_dir data/videos --out outputs/evaluation_report.json
+Evaluates system output against ground truth across all clips.
+Calculates state classification accuracy, bed-exit metrics, and duration errors.
 """
 
 import argparse
@@ -29,7 +12,6 @@ from collections import defaultdict
 
 
 EVENT_TIME_TOLERANCE_SEC = 2.0  # a predicted event within this many seconds
-                                  # of a ground-truth event counts as a match
 
 SAMPLE_INTERVAL_SEC = 0.5  # must match extract_frames.py's --interval
 EQUIVALENT_STATES = {
@@ -130,12 +112,6 @@ def evaluate_events(clip_name, gt_events_path, pred_events_path, event_type=None
     matched_pred = set()
 
     for pi, pe in enumerate(pred_events):
-        # Ground truth marks events at the START of the behavioural sequence
-        # (e.g. first approach to bed, first standing up), while our detector
-        # records confirmed_time at the END of the sequence (LYING_IN_BED
-        # confirmed, WALKING confirmed). Use whichever of start_time /
-        # confirmed_time is closest to the GT mark, so a timing-definition
-        # difference doesn't falsely penalise a correctly detected event.
         pred_confirmed = parse_time(pe["confirmed_time"])
         pred_start     = parse_time(pe["start_time"])
         for gi, (gtype, gtime) in enumerate(gt_events):
@@ -205,7 +181,6 @@ def main(clips_dir, out_path):
     clip_names = sorted(
         os.path.splitext(os.path.basename(p))[0]
         for p in glob.glob(os.path.join(clips_dir, "*.mp4"))
-        if "merged_full" not in p
     )
 
     all_state_results = []
@@ -329,7 +304,7 @@ def main(clips_dir, out_path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phase 8: Full evaluation against ground truth.")
+    parser = argparse.ArgumentParser(description="Full evaluation against ground truth.")
     parser.add_argument("--clips_dir", default="data/videos")
     parser.add_argument("--out", default="outputs/evaluation_report.json")
     args = parser.parse_args()

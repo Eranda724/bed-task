@@ -1,9 +1,5 @@
 """
-Phase 2 - Batch runner: compute_features.py for every clip that has both
-a pose JSON and a bed region JSON.
-
-Usage:
-    python run_phase2_all.py
+Batch runner to compute features for clips with valid pose and bed region JSONs.
 """
 
 import os
@@ -34,7 +30,7 @@ def main():
         run(["python", "src/perception/compute_features.py",
              "--pose_json", pose_path, "--bed_region", bed_region_path, "--out", out_path])
 
-    print("\nAll clips processed through Phase 2.")
+    print("\nFeature extraction complete.")
 
 
 if __name__ == "__main__":

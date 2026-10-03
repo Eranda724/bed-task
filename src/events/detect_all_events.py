@@ -1,8 +1,5 @@
 """
-Phase 5 - Batch runner: detect_bed_events.py for every clip timeline.
-
-Usage:
-    python run_phase5_all.py
+Batch runner to detect bed exit/return events for every clip timeline.
 """
 
 import os
@@ -30,7 +27,7 @@ def main():
              "--timeline", timeline_path, "--features", features_path,
              "--bed_region", bed_region_path, "--out", out_path])
 
-    print("\nAll clips processed through Phase 5.")
+    print("\nEvent detection complete.")
 
 
 if __name__ == "__main__":
