@@ -14,9 +14,7 @@ from collections import defaultdict
 EVENT_TIME_TOLERANCE_SEC = 2.0  # a predicted event within this many seconds
 
 SAMPLE_INTERVAL_SEC = 0.5  # must match extract_frames.py's --interval
-EQUIVALENT_STATES = {
-    "OUT_OF_BED": "UNKNOWN",
-}
+EQUIVALENT_STATES = {}
 
 def parse_time(t: str) -> float:
     parts = [float(p) for p in t.strip().split(":")]
@@ -228,14 +226,14 @@ def main(clips_dir, out_path):
     exit_tp = sum(e["true_positives"] for e in event_exit_results)
     exit_fp = sum(e["false_positives"] for e in event_exit_results)
     exit_fn = sum(e["false_negatives"] for e in event_exit_results)
-    exit_precision = exit_tp / (exit_tp + exit_fp) if (exit_tp + exit_fp) > 0 else None
-    exit_recall = exit_tp / (exit_tp + exit_fn) if (exit_tp + exit_fn) > 0 else None
+    exit_precision = exit_tp / (exit_tp + exit_fp) if (exit_tp + exit_fp) > 0 else 0.0
+    exit_recall = exit_tp / (exit_tp + exit_fn) if (exit_tp + exit_fn) > 0 else 0.0
 
     return_tp = sum(e["true_positives"] for e in event_return_results)
     return_fp = sum(e["false_positives"] for e in event_return_results)
     return_fn = sum(e["false_negatives"] for e in event_return_results)
-    return_precision = return_tp / (return_tp + return_fp) if (return_tp + return_fp) > 0 else None
-    return_recall = return_tp / (return_tp + return_fn) if (return_tp + return_fn) > 0 else None
+    return_precision = return_tp / (return_tp + return_fp) if (return_tp + return_fp) > 0 else 0.0
+    return_recall = return_tp / (return_tp + return_fn) if (return_tp + return_fn) > 0 else 0.0
 
     overall_duration_errors = defaultdict(list)
     for clip, errors in duration_eval_results.items():

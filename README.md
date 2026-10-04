@@ -72,13 +72,7 @@ python src/agent/agent_analysis.py --timeline outputs/timeline/case05_leaving_be
 
 ### Run everything on all clips at once
 ```bash
-python src/perception/track_all_videos.py     # frames, pose, tracking, viz (bed regions must be marked first)
-python src/perception/compute_all_features.py # features
-python src/temporal/generate_all_timelines.py # classification + smoothing
-python src/events/detect_all_events.py        # bed events
-python src/outputs/generate_all_summaries.py  # duration summaries
-python src/agent/analyze_all_clips.py         # agentic reasoning + alerts
-python src/evaluation/evaluate.py             # full evaluation report
+python run_pipeline.py
 ```
 
 Output appears under `outputs/` — `timeline/`, `summary/`, `events/`, `agent/`, and a single consolidated `evaluation_report.json`.
@@ -195,7 +189,7 @@ Output appears under `outputs/` — `timeline/`, `summary/`, `events/`, `agent/`
 **Why YOLOv8n-pose:** free, open-source, combines person detection and
 17-keypoint pose estimation in a single forward pass. The "nano" variant
 was chosen deliberately for CPU-only inference (no CUDA GPU available on
-the development machine).
+the development machine). We also leverage YOLOv8's built-in **BoT-SORT tracker** to maintain consistent track IDs across frames.
 
 **Per-frame features derived from pose keypoints:**
 - `torso_angle_deg` — angle of the shoulder-to-hip line from vertical (near 0° = upright, near 90° = horizontal)
@@ -253,13 +247,13 @@ the pattern match.
 Evaluated across all 13 test clips, scoring predicted output against hand-labeled ground truth.
 
 ### State Classification
-- **Overall accuracy: 63.8%** (247/387 sampled frames, at the same 0.5s interval used throughout the pipeline)
-- **Confusion Matrix Highlights**: Note the confusion between `SITTING_ON_BED` and `SITTING_OUTSIDE_BED` (e.g. 23 SITTING_OUTSIDE_BED correctly identified, but 2 misclassified as SITTING_ON_BED and 4 as STANDING). The tracker uses a 2D heuristic, causing some ambiguity at the bed's border.
-- **Most LYING_IN_BED errors are UNKNOWN, not a wrong state** — 53 misclassifications are the system correctly refusing to guess during occlusion (blanket coverage, person rolling onto their side) rather than a detection error.
+- **Overall accuracy: 70.1%** (274/391 sampled frames, at the same 0.5s interval used throughout the pipeline)
+- **Confusion Matrix Highlights**: Note the confusion between `SITTING_ON_BED` and `SITTING_OUTSIDE_BED` (e.g. 26 SITTING_OUTSIDE_BED correctly identified, but 4 misclassified as SITTING_ON_BED and 3 as WALKING). The tracker uses a 2D heuristic, causing some ambiguity at the bed's border.
+- **Most LYING_IN_BED errors are UNKNOWN, not a wrong state** — 48 misclassifications are the system correctly refusing to guess during occlusion (blanket coverage, person rolling onto their side) rather than a detection error.
 - Example failure cases and the full confusion matrix are exported to `outputs/evaluation_report.json`.
 
 ### Bed Events
-- **Bed Exits:** Precision: 100.0%, Recall: 100.0% (2 true positives, 0 false positives, 0 false negatives)
+- **Bed Exits:** Precision: 50.0%, Recall: 100.0% (1 true positive, 1 false positive, 0 false negatives). *Note: These exit numbers rest on tiny data (only one real exit in `case05`, and one false exit in `case12`).*
 - **Return to Bed:** Precision: 100.0%, Recall: 100.0% (2 true positives, 0 false positives, 0 false negatives)
 
 ### Duration Estimation
@@ -267,48 +261,27 @@ Average absolute error in duration calculation compared to ground truth:
 
 | State | Avg. error |
 |---|---|
-| sitting_outside_bed | 0.27s |
-| standing | 0.77s |
-| out_of_bed | 0.96s |
+| walking | 1.19s |
 | sitting_on_bed | 1.12s |
-| walking | 1.35s |
-| lying_in_bed | 2.38s |
-| unknown | 3.62s |
+| lying_in_bed | 2.15s |
+| sitting_outside_bed | 0.65s |
+| standing | 0.62s |
+| unknown | 2.62s |
+| out_of_bed | 0.19s |
 
 This matches the PDF's own duration-error example format closely (e.g.
 "Lying duration error: 8 sec") and is comparable or better.
 
 ## Failure Cases
 
-**1. Fully blanket-covered lying (`case09_blankets`)**
-The pose model never produces a single confident detection for the whole
-15s clip; the system correctly reports UNKNOWN throughout rather than
-guessing, but this produces a 15-second duration error against ground
-truth's LYING_IN_BED label. Root cause: YOLOv8n-pose cannot detect a
-person whose body outline is fully obscured by bedding. A heavier pose
-model or an IR/depth camera (outside this assignment's scope) would likely
-help.
+**1. Lying in bed becomes UNKNOWN (`case01_turning_in_bed`, `case09_blankets`)**
+When a person rolls onto their side or is fully covered by blankets, the pose model loses confident keypoints. The system falls back to UNKNOWN rather than guessing they are still lying down. This is a system failure that causes duration errors against the ground truth LYING_IN_BED labels, as the system incorrectly loses track of the person and refuses to guess during occlusion.
 
-**2. Person rolling onto their side (`case01_turning_in_bed`)**
-Detection is reliable for the first ~7.5s (person lying face-up), then
-drops to zero once the person rolls onto their side, facing away from
-camera, and pulls the blanket around themselves. The system falls back to
-UNKNOWN rather than assuming the person is still lying down — an honest
-but conservative choice, since it cannot distinguish "still lying, just
-turned" from a genuine unknown event without further context (an obvious
-extension would be a short confirmation grace period before truly
-alerting on a post-lying UNKNOWN segment).
+**2. False bed exit when standing beside bed (`case12_poor_lighting`)**
+The system gives a false positive bed exit when the person only stands beside the bed. Because the lighting is poor and the person is right at the bed boundary, the initial lying/sitting is detected, followed by standing and brief movement that crosses the WALKING threshold, satisfying the `IN_BED -> STANDING -> WALKING` sequence pattern even though they never actually left the bedside area.
 
 **3. Caregiver occludes the patient (`case11_caregiver`)**
-When a second person (caregiver) stands close to the patient, the patient
-is briefly undetected in several frames (occlusion), leaving only the
-caregiver as the sole visible detection. An earlier version of the
-multi-person disambiguation logic wrongly attributed the caregiver's
-walking to the patient in this situation. The final version anchors
-primary-person selection to a fixed bed centroid rather than frame-to-frame
-position continuity (which was found to drift once it locked onto the
-wrong person even briefly) — correctly reporting UNKNOWN for the occluded
-frames instead of inventing movement the patient never made.
+When a second person (caregiver) stands close to the patient, the patient is briefly undetected in several frames (occlusion), leaving only the caregiver as the sole visible detection. The final version anchors primary-person selection to a fixed bed centroid—correctly reporting UNKNOWN for the occluded frames instead of inventing movement the patient never made.
 
 **4. Posture transition delays and ambiguity (`case02_sitting_up`, `case04_stand_sit_back`)**
 In `case02`, the transition from lying to sitting up is predicted as `LYING_IN_BED` for several seconds after the ground truth marks `SITTING_ON_BED`. This is because the torso angle crosses the strict threshold a bit later in the movement. Similarly, in `case04`, a `STANDING` state is occasionally misclassified as `SITTING_OUTSIDE_BED` due to the 2D bounding box ratio being sensitive to camera perspective during the transition.
