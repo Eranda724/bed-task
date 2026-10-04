@@ -57,20 +57,7 @@ venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 ```
 
-### Run the full pipeline on one clip
-```bash
-python src/perception/extract_frames.py --video data/videos/case05_leaving_bed.mp4
-python src/perception/mark_bed_region.py --video data/videos/case05_leaving_bed.mp4
-python src/perception/detect_pose_track.py --frames_dir outputs/frames/case05_leaving_bed --video_name case05_leaving_bed
-python src/perception/compute_features.py --pose_json outputs/pose/case05_leaving_bed_pose.json --bed_region data/bed_regions/case05_leaving_bed.json --out outputs/features/case05_leaving_bed_features.json
-python src/temporal/classify_frames.py --features outputs/features/case05_leaving_bed_features.json --out outputs/states/case05_leaving_bed_candidates.json
-python src/temporal/smooth_states.py --candidates outputs/states/case05_leaving_bed_candidates.json --bed_region data/bed_regions/case05_leaving_bed.json --out outputs/timeline/case05_leaving_bed_timeline.json
-python src/events/detect_bed_events.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --features outputs/features/case05_leaving_bed_features.json --bed_region data/bed_regions/case05_leaving_bed.json --out outputs/events/case05_leaving_bed_events.json
-python src/outputs/duration_summary.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --events outputs/events/case05_leaving_bed_events.json --out outputs/summary/case05_leaving_bed_summary.json
-python src/agent/agent_analysis.py --timeline outputs/timeline/case05_leaving_bed_timeline.json --events outputs/events/case05_leaving_bed_events.json --out outputs/agent/case05_leaving_bed_reasoning.json
-```
-
-### Run everything on all clips at once
+### Run the Pipeline
 ```bash
 python run_pipeline.py
 ```
