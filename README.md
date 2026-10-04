@@ -247,8 +247,8 @@ the pattern match.
 Evaluated across all 13 test clips, scoring predicted output against hand-labeled ground truth.
 
 ### State Classification
-- **Overall accuracy: 70.1%** (274/391 sampled frames, at the same 0.5s interval used throughout the pipeline)
-- **Confusion Matrix Highlights**: Note the confusion between `SITTING_ON_BED` and `SITTING_OUTSIDE_BED` (e.g. 26 SITTING_OUTSIDE_BED correctly identified, but 4 misclassified as SITTING_ON_BED and 3 as WALKING). The tracker uses a 2D heuristic, causing some ambiguity at the bed's border.
+- **Overall accuracy: 64.2%** (251/391 sampled frames, at the same 0.5s interval used throughout the pipeline)
+- **Confusion Matrix Highlights**: Note the confusion between `SITTING_ON_BED` and `SITTING_OUTSIDE_BED` (e.g. 25 SITTING_OUTSIDE_BED correctly identified, but 2 misclassified as SITTING_ON_BED). The tracker uses a 2D heuristic, causing some ambiguity at the bed's border.
 - **Most LYING_IN_BED errors are UNKNOWN, not a wrong state** — 48 misclassifications are the system correctly refusing to guess during occlusion (blanket coverage, person rolling onto their side) rather than a detection error.
 - Example failure cases and the full confusion matrix are exported to `outputs/evaluation_report.json`.
 
@@ -261,13 +261,13 @@ Average absolute error in duration calculation compared to ground truth:
 
 | State | Avg. error |
 |---|---|
+| unknown | 3.46s |
+| lying_in_bed | 2.08s |
+| out_of_bed | 0.96s |
+| sitting_outside_bed | 0.42s |
+| standing | 0.85s |
 | walking | 1.19s |
-| sitting_on_bed | 1.12s |
-| lying_in_bed | 2.15s |
-| sitting_outside_bed | 0.65s |
-| standing | 0.62s |
-| unknown | 2.62s |
-| out_of_bed | 0.19s |
+| sitting_on_bed | 1.04s |
 
 This matches the PDF's own duration-error example format closely (e.g.
 "Lying duration error: 8 sec") and is comparable or better.
